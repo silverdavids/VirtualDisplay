@@ -1,3 +1,41 @@
+# Virtual Display
+
+React display for the platform virtual events API.
+
+## Local Pipeline
+
+Start `Virtual-Api` first:
+
+```powershell
+cd ..\Virtual-Api
+$env:DISABLE_REDIS="true"
+npm start
+```
+
+Start this display in another terminal:
+
+```powershell
+cd ..\virtualdisplay
+npm start
+```
+
+Start the Virtual Horizon scraper in another terminal:
+
+```powershell
+cd ..\virtual-scraper
+$env:VIRTUAL_API_URL="http://localhost:3000"
+$env:SYNC_INTERVAL_SECONDS="30"
+npm run auto:sync
+```
+
+The display loads initial data from REST and subscribes to `virtual-display-updated` over Socket.IO at `http://localhost:3000`. When the incoming provider and league match the selected league, matches update immediately and the browser console logs:
+
+```text
+virtual display updated VirtualHorizon 21 60
+```
+
+`socket.io-client` is already included in this project.
+
 # Getting Started with Create React App
 
 This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
@@ -68,3 +106,9 @@ This section has moved here: [https://facebook.github.io/create-react-app/docs/d
 ### `npm run build` fails to minify
 
 This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+# Terminal authentication
+
+The display activates through `POST /api/auth/display` using a terminal code and activation key. The API returns a short-lived access token; only the normalized token/session is stored in browser local storage under `virtualDisplayTerminalSession`.
+
+`REACT_APP_TERMINAL_CODE` may provide a non-secret default for the login form. `REACT_APP_TERMINAL_SECRET` is deprecated and intentionally ignored by the application because React environment variables are embedded in the public browser bundle. Remove it from local configuration after confirming all terminals use interactive activation.
+# VirtualDisplay
