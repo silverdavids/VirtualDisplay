@@ -7,6 +7,13 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+.terminal-auth-status { position: fixed; z-index: 9999; right: 10px; top: 8px; height: 46px; box-sizing: border-box; display: flex; align-items: center; gap: 10px; padding: 4px 9px 4px 13px; border-left: 1px solid #444; color: #ddd; background: rgba(10, 10, 10, .94); font: 12px/1.2 Arial, sans-serif; }
+.terminal-auth-dot { width: 8px; height: 8px; border-radius: 50%; background: #22c20e; box-shadow: 0 0 6px #22c20e; }
+.terminal-auth-identity { min-width: 105px; display: grid; gap: 3px; }
+.terminal-auth-identity strong { color: #fff; font-size: 14px; }
+.terminal-auth-identity small { color: #aaa; font-size: 10px; }
+.terminal-auth-status button { height: 32px; padding: 0 12px; border: 0; border-left: 1px solid #444; color: #ddd; background: transparent; cursor: pointer; }
+
 code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
     monospace;

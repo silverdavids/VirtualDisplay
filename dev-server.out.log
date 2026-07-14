@@ -1,0 +1,15 @@
+
+> virtualdisplay@0.1.0 start
+> react-scripts start
+
+Something is already running on portCompiled successfully!
+
+You can now view virtualdisplay in the browser.
+
+  Local:            http://localhost:3001
+  On Your Network:  http://192.168.100.5:3001
+
+Note that the development build is not optimized.
+To create a production build, use npm run build.
+
+webpack compiled [1m[32msuccessfully[39m[22m
