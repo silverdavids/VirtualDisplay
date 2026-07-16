@@ -36,6 +36,32 @@ virtual display updated VirtualHorizon 21 60
 
 `socket.io-client` is already included in this project.
 
+## Docker Compose
+
+Build and run the production display with:
+
+```powershell
+docker compose up --build -d
+```
+
+Open `http://localhost:3001`. The API URLs are compiled into the browser bundle during the image build. Override them, the public terminal-code default, or the host port before building when needed:
+
+```powershell
+$env:REACT_APP_VIRTUAL_API_BASE_URL="http://localhost:3000"
+$env:REACT_APP_VIRTUAL_TICKETS_API="http://127.0.0.1:5088"
+$env:REACT_APP_TERMINAL_CODE="DISPLAY-001"
+$env:DISPLAY_PORT="8080"
+docker compose up --build -d
+```
+
+Do not pass activation keys or secrets as React build arguments; values prefixed with `REACT_APP_` are public in the generated browser bundle.
+
+Stop and remove the container with:
+
+```powershell
+docker compose down
+```
+
 # Getting Started with Create React App
 
 This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
