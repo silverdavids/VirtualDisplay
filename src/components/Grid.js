@@ -1,15 +1,16 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   FaChevronDown,
-  FaChevronRight,
   FaClock,
   FaCoins,
-  FaCog,
-  FaFutbol,
-  FaHeadphones,
-  FaListAlt,
+  FaChevronRight,
+  FaMoneyBillWave,
+  FaMoon,
   FaPrint,
   FaReceipt,
+  FaSearch,
+  FaSignOutAlt,
+  FaSun,
   FaTrash,
   FaTrophy,
 } from 'react-icons/fa';
@@ -26,6 +27,8 @@ import {
 } from '../services/ticketApi';
 import {DEFAULT_LEAGUE_ID, DEFAULT_PROVIDER, getDisplay, getLeagues} from '../services/virtualApi';
 import {printVirtualReceipt} from '../utils/printVirtualReceipt';
+import TicketCancelModal from './TicketCancelModal';
+import TicketPayoutModal from './TicketPayoutModal';
 import connectSocket, {
   VIRTUAL_DISPLAY_UPDATED_EVENT,
   VIRTUAL_EVENTS_QUEUE_UPDATED_EVENT,
@@ -478,15 +481,17 @@ const styles = `
 
   .terminal-topbar {
     height: 72px;
-    display: grid;
-    grid-template-columns: auto 1fr 320px;
+    display: flex;
+    align-items: stretch;
     background: #232323;
     border-bottom: 2px solid #d80000;
   }
 
   .competition-tabs {
     display: flex;
+    flex: 1 1 auto;
     min-width: 0;
+    overflow: hidden;
   }
 
   .competition-tab {
@@ -521,68 +526,94 @@ const styles = `
     font-size: 22px;
   }
 
-  .account-strip {
+  .header-actions {
+    flex: 0 0 auto;
     display: flex;
     align-items: center;
-    justify-content: flex-end;
-    gap: 10px;
-    padding-right: 20px;
-    font-size: 21px;
+    gap: 4px;
+    min-width: 0;
+    padding: 0 8px;
+    border-left: 1px solid #333;
+    color: #ddd;
+    font-size: 14px;
     white-space: nowrap;
   }
 
-  .account-strip .red-icon {
+  .header-metric {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 8px;
+  }
+
+  .header-metric svg {
     color: #e00000;
   }
 
-  .toolbar-icons {
-    display: grid;
-    grid-template-columns: repeat(5, 1fr);
-    border-left: 1px solid #333;
-  }
-
-  .toolbar-button {
+  .header-action-button {
+    min-width: 44px;
+    height: 44px;
     display: grid;
     place-items: center;
+    align-content: center;
+    gap: 2px;
+    box-sizing: border-box;
+    padding: 3px 8px;
+    border: 1px solid transparent;
+    border-radius: 4px;
     background: transparent;
-    border: 0;
-    border-left: 1px solid #111;
     color: #fff;
     cursor: pointer;
-    font-size: 31px;
-    padding: 0;
+    font: inherit;
   }
 
-  .toolbar-button.tickets-button {
-    align-content: center;
-    gap: 3px;
-    font-size: 22px;
+  .header-action-button:hover {
+    border-color: #555;
+    background: #292929;
   }
 
-  .toolbar-button .toolbar-label {
+  .header-action-button:focus-visible {
+    outline: 2px solid #f3b000;
+    outline-offset: 1px;
+  }
+
+  .header-action-button svg {
+    font-size: 20px;
+  }
+
+  .header-action-label {
     font-size: 11px;
     font-weight: 800;
     line-height: 1;
     text-transform: uppercase;
   }
 
-  .calculator-icon {
-    display: grid;
-    grid-template-columns: repeat(2, 16px);
-    gap: 3px;
+  .header-terminal-identity {
+    min-width: 96px;
+    max-width: 150px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 0 10px;
+    line-height: 1.15;
+    overflow-wrap: anywhere;
   }
 
-  .calculator-icon span {
-    width: 16px;
-    height: 16px;
-    display: grid;
-    place-items: center;
-    background: #fff;
-    border-radius: 2px;
-    color: #1c1c1c;
-    font-size: 16px;
-    font-weight: 900;
-    line-height: 1;
+  .header-terminal-identity strong {
+    color: #fff;
+    font-size: 14px;
+  }
+
+  .header-terminal-identity small {
+    margin-top: 3px;
+    color: #aaa;
+    font-size: 10px;
+  }
+
+  .header-logout {
+    border-left-color: #333;
+    color: #ddd;
   }
 
   .terminal-body {
@@ -1415,7 +1446,7 @@ const styles = `
     height: 100vh;
     min-height: 620px;
     display: grid;
-    grid-template-rows: 62px minmax(0, 1fr) 38px;
+    grid-template-rows: 62px minmax(0, 1fr) 76px;
     background: radial-gradient(circle at 58% 25%, #242424 0, #151515 48%, #090909 100%);
   }
 
@@ -1426,7 +1457,6 @@ const styles = `
 
   .terminal-topbar {
     height: 62px;
-    grid-template-columns: minmax(0, 1fr) auto 250px;
     background: linear-gradient(180deg, #0b0b0b, #111);
     border-bottom: 1px solid #d40000;
   }
@@ -1436,9 +1466,7 @@ const styles = `
   .competition-tab.active { color: #fff; background: transparent; border-bottom-color: #e00000; }
   .competition-tab svg { font-size: 22px; filter: none; color: #f00000; }
   .topbar-chevron { margin-right: auto; }
-  .account-strip { padding: 0 18px; font-size: 15px; color: #ddd; }
-  .toolbar-icons { grid-template-columns: repeat(5, 48px); }
-  .toolbar-button { font-size: 21px; }
+  .header-actions { height: 100%; }
 
   .terminal-body {
     min-height: 0;
@@ -1551,27 +1579,84 @@ const styles = `
   .receipt-action { height: 42px; font-size: 21px; }
   .receipt-action svg { display: block; margin: auto; }
 
-  .virtual-display-footer { display: grid; grid-template-columns: 1fr 1fr 1fr; align-items: center; padding: 0 18px; border-top: 1px solid #2b2b2b; color: #aaa; background: #090909; font: 13px "Segoe UI", Arial, sans-serif; }
-  .virtual-display-footer span:nth-child(2) { text-align: center; }
-  .virtual-display-footer span:last-child { text-align: right; }
+  .virtual-display-footer { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: stretch; padding: 0; border-top: 1px solid #2b2b2b; color: #aaa; background: #090909; font: 13px "Segoe UI", Arial, sans-serif; }
+  .footer-meta { display: grid; grid-template-columns: 1fr 1fr 1fr; align-items: center; padding: 0 18px; }
+  .footer-meta span:nth-child(2) { text-align: center; }
+  .footer-meta span:last-child { text-align: right; }
   .secure-dot { color: #25b818; }
+  .display-action-dock { display: grid; grid-template-columns: repeat(4, minmax(104px, 1fr)); min-width: min(42vw, 520px); }
+  .dock-action { display: grid; grid-template-rows: 1fr auto; place-items: center; gap: 2px; border: 0; border-left: 2px solid rgba(0,0,0,.35); color: #fff; font: 900 14px "Arial Narrow", Impact, sans-serif; cursor: pointer; }
+  .dock-action svg { font-size: 31px; }
+  .dock-action.clear { background: linear-gradient(#e30a0a,#b30000); }
+  .dock-action.search { background: linear-gradient(#1699c8,#0878a5); }
+  .dock-action.payout { background: linear-gradient(#12b7ba,#098b91); }
+  .dock-action.print { background: linear-gradient(#656565,#414141); }
+  .dock-action:disabled { opacity: .42; cursor: not-allowed; }
+
+  .table-theme-light .match-list { background: #a9a9a9; }
+  .table-theme-light .match-row,
+  .table-theme-light .match-row:nth-child(odd) { background: linear-gradient(#fff,#e8e8e8); color: #222; border-bottom: 1px solid #aaa; }
+  .table-theme-light .match-row:nth-child(even) { background: linear-gradient(#ededed,#d7d7d7); }
+  .table-theme-light .odd-button { border-color: #333; background: linear-gradient(#3a3a3a,#121212); color: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.35); }
+  .table-theme-light .odd-button.selected { background: linear-gradient(#f21b1b,#ac0000); }
 
   @media (max-width: 1050px) {
     .betting-board { --pre-odds-width: 255px; }
-    .account-strip { display: none; }
-    .terminal-topbar { grid-template-columns: 1fr 240px; }
+    .header-metric-label,
+    .header-action-label,
+    .header-terminal-identity small { display: none; }
+    .header-terminal-identity { min-width: 78px; max-width: 105px; padding-inline: 5px; }
     .odds-area { padding-inline: 6px; }
     .market-layout { gap: 8px; }
     .terminal-body { grid-template-columns: minmax(0, 1fr) 280px; }
     .match-row, .match-row:nth-child(odd) { grid-template-columns: 24px 34px minmax(36px, 1fr) 18px 34px minmax(36px, 1fr) 20px minmax(0, 1fr); }
     .team-code { font-size: 14px; }
+    .footer-meta span:first-child,
+    .footer-meta span:nth-child(2) { display: none; }
+    .footer-meta { grid-template-columns: 1fr; padding: 0 8px; }
+    .display-action-dock { min-width: 430px; }
     .crest { width: 29px; height: 29px; }
     .odd-button { font-size: 15px; }
+  }
+
+  @media (max-height: 820px) {
+    .betting-board {
+      min-height: 0;
+      grid-template-rows: 58px minmax(0, 1fr) 68px;
+    }
+    .terminal-topbar { height: 58px; }
+    .odds-area {
+      grid-template-rows: 124px minmax(0, 1fr);
+      padding-top: 5px;
+      padding-bottom: 5px;
+    }
+    .league-panel {
+      height: 124px;
+      grid-template-columns: minmax(180px, 1fr) 142px;
+    }
+    .markets { height: 124px; }
+    .market-tab { height: 31px; }
+    .market-labels { padding-top: 4px; }
+    .market-label { height: 31px; }
+    .timer-dial { width: 70px; height: 70px; }
+    .match-list { overflow: hidden; }
+    .match-row,
+    .match-row:nth-child(odd) { height: auto; min-height: 0; }
+    .crest { width: clamp(28px, 3.5vh, 36px); height: clamp(28px, 3.5vh, 36px); }
+    .odd-button { height: clamp(28px, 4.2vh, 35px); font-size: clamp(15px, 2.4vh, 21px); }
+    .empty-slip { height: calc(100vh - 126px); }
+    .footer-meta { padding-inline: 12px; font-size: 12px; }
+    .display-action-dock { min-width: min(42vw, 500px); }
+    .dock-action { gap: 0; padding: 3px 8px; font-size: 12px; line-height: 1; }
+    .dock-action svg { font-size: 25px; }
   }
 
   @media (max-width: 900px) {
     .terminal-body { grid-template-columns: minmax(0, 1fr); }
     .bet-slip { display: none; }
+    .footer-meta { display: none; }
+    .virtual-display-footer { grid-template-columns: 1fr; }
+    .display-action-dock { width: 100%; min-width: 0; }
   }
 `;
 
@@ -1602,7 +1687,61 @@ const EMPTY_DISPLAY = {
   events: [],
 };
 
-const Grid = ({onOpenTickets}) => {
+export const TerminalHeaderActions = ({
+  currentTime,
+  onLogout,
+  onOpenTickets,
+  tableTheme,
+  terminal,
+  toggleTableTheme,
+}) => (
+  <div className="header-actions" aria-label="Terminal controls">
+    <span className="header-metric" aria-label={`Current time ${formatClockTime(new Date(currentTime))}`}>
+      <FaClock aria-hidden="true" />
+      <span>{formatClockTime(new Date(currentTime))}</span>
+    </span>
+    <span className="header-metric" aria-label="Balance 0 USH">
+      <FaCoins aria-hidden="true" />
+      <span>0 USH</span>
+    </span>
+    <button
+      aria-label={`Switch to ${tableTheme === 'dark' ? 'light' : 'dark'} theme`}
+      className="header-action-button"
+      onClick={toggleTableTheme}
+      title={`Switch to ${tableTheme === 'dark' ? 'light' : 'dark'} theme`}
+      type="button"
+    >
+      {tableTheme === 'dark' ? <FaSun aria-hidden="true" /> : <FaMoon aria-hidden="true" />}
+      <span className="header-action-label">Theme</span>
+    </button>
+    <button
+      aria-label="Open tickets"
+      className="header-action-button"
+      onClick={onOpenTickets}
+      title="Tickets"
+      type="button"
+    >
+      <FaReceipt aria-hidden="true" />
+      <span className="header-action-label">Tickets</span>
+    </button>
+    <span className="header-terminal-identity" aria-label="Authenticated terminal">
+      <strong>{terminal?.code || 'Terminal'}</strong>
+      <small>{terminal?.name || 'Display terminal'}</small>
+    </span>
+    <button
+      aria-label="Logout"
+      className="header-action-button header-logout"
+      onClick={onLogout}
+      title="Logout"
+      type="button"
+    >
+      <FaSignOutAlt aria-hidden="true" />
+      <span className="header-action-label">Logout</span>
+    </button>
+  </div>
+);
+
+const Grid = ({onLogout, onOpenTickets, terminal}) => {
   const [leagues, setLeagues] = useState([]);
   const [selectedLeague, setSelectedLeague] = useState(null);
   const [display, setDisplay] = useState(EMPTY_DISPLAY);
@@ -1615,6 +1754,10 @@ const Grid = ({onOpenTickets}) => {
   const [ticketStatus, setTicketStatus] = useState(null);
   const [placedTicket, setPlacedTicket] = useState(null);
   const [printError, setPrintError] = useState('');
+  const [payoutOpen, setPayoutOpen] = useState(false);
+  const [cancelTicketOpen, setCancelTicketOpen] = useState(false);
+  const [cancelTicketNumber, setCancelTicketNumber] = useState('');
+  const [tableTheme, setTableTheme] = useState(() => localStorage.getItem('virtualDisplayTableTheme') || 'dark');
   const [displayCountdown, setDisplayCountdown] = useState('03:00');
   const [countdownSeconds, setCountdownSeconds] = useState(180);
   const [currentTime, setCurrentTime] = useState(() => Date.now());
@@ -1624,6 +1767,14 @@ const Grid = ({onOpenTickets}) => {
     providerEventId: '',
     eventCount: 0,
   });
+
+  const toggleTableTheme = () => {
+    setTableTheme((current) => {
+      const next = current === 'dark' ? 'light' : 'dark';
+      localStorage.setItem('virtualDisplayTableTheme', next);
+      return next;
+    });
+  };
 
   const getDisplayPayloadFromSocketPayload = useCallback((payload) => {
     if (!payload || typeof payload !== 'object') return payload;
@@ -2572,7 +2723,7 @@ const Grid = ({onOpenTickets}) => {
   };
 
   return (
-    <main className="betting-board">
+    <main className={`betting-board table-theme-${tableTheme}`}>
       <style>{styles}</style>
       <div className="socket-debug-badge">
         <div>Socket: <strong>{socketDebug.connected ? 'connected' : 'disconnected'}</strong></div>
@@ -2598,38 +2749,14 @@ const Grid = ({onOpenTickets}) => {
           <FaChevronDown className="topbar-chevron" />
         </nav>
 
-        <div className="account-strip">
-          <FaHeadphones className="red-icon" />
-          <span>USERNOW</span>
-          <FaCoins className="red-icon" />
-          <span>0 USH</span>
-          <FaClock className="red-icon" />
-          <span>20:02:01</span>
-        </div>
-
-        <div className="toolbar-icons">
-          <button className="toolbar-button tickets-button" onClick={onOpenTickets} title="Tickets" type="button">
-            <FaReceipt />
-            <span className="toolbar-label">Tickets</span>
-          </button>
-          <span className="toolbar-button" title="Slip list">
-            <FaListAlt />
-          </span>
-          <span className="toolbar-button" title="Calculator">
-            <span className="calculator-icon" aria-hidden="true">
-              <span>+</span>
-              <span>-</span>
-              <span>x</span>
-              <span>=</span>
-            </span>
-          </span>
-          <span className="toolbar-button" title="Settings">
-            <FaCog />
-          </span>
-          <span className="toolbar-button" title="Virtual football">
-            <FaFutbol />
-          </span>
-        </div>
+        <TerminalHeaderActions
+          currentTime={currentTime}
+          onLogout={onLogout}
+          onOpenTickets={onOpenTickets}
+          tableTheme={tableTheme}
+          terminal={terminal}
+          toggleTableTheme={toggleTableTheme}
+        />
       </section>
 
       <section className="terminal-body">
@@ -2840,41 +2967,66 @@ const Grid = ({onOpenTickets}) => {
                   <span>POSSIBLE WIN</span>
                   <strong>{formatMoney(possibleWin)}</strong>
                 </div>
-                <div className="receipt-actions">
-                  <button
-                    className="receipt-action clear"
-                    disabled={isBettingClosed || ticketSubmitting}
-                    onClick={() => {
-                      setSlip([]);
-                      setTicketStatus(null);
-                    }}
-                    aria-label="Clear bet slip"
-                    title="Clear bet slip"
-                    type="button"
-                  >
-                    <FaTrash aria-hidden="true" />
-                  </button>
-                  <button
-                    className="receipt-action place"
-                    disabled={isBettingClosed || ticketSubmitting || slip.length === 0 || Number(stake) <= 0}
-                    onClick={submitTicket}
-                    aria-label={ticketSubmitting ? 'Placing bet' : 'Place bet'}
-                    title={ticketSubmitting ? 'Placing bet' : 'Place bet'}
-                    type="button"
-                  >
-                    {ticketSubmitting ? <span className="receipt-action-loading">…</span> : <FaPrint aria-hidden="true" />}
-                  </button>
-                </div>
               </div>
             </div>
           )}
         </aside>
       </section>
       <footer className="virtual-display-footer">
-        <span>© Virtual Horizon</span>
-        <span>Virtual Display V{process.env.REACT_APP_DISPLAY_VERSION || '1.0.0'}</span>
-        <span><span className="secure-dot">●</span> Secure connection &nbsp; {formatClockTime(new Date(currentTime))}</span>
+        <div className="footer-meta">
+          <span>© Virtual Horizon</span>
+          <span>Virtual Display V{process.env.REACT_APP_DISPLAY_VERSION || '1.0.0'}</span>
+          <span><span className="secure-dot">●</span> Secure connection &nbsp; {formatClockTime(new Date(currentTime))}</span>
+        </div>
+        <div className="display-action-dock" aria-label="Display actions">
+          <button
+            aria-label="Clear bet slip"
+            className="dock-action clear"
+            disabled={ticketSubmitting || slip.length === 0}
+            onClick={() => {
+              setSlip([]);
+              setStake(DEFAULT_STAKE);
+              setTicketStatus(null);
+            }}
+            title="Clear bet slip"
+            type="button"
+          >
+            <FaTrash aria-hidden="true" /><span>CLEAR</span>
+          </button>
+          <button className="dock-action search" disabled={ticketSubmitting} onClick={() => setPayoutOpen(true)} type="button">
+            <FaSearch /><span>SEARCH</span>
+          </button>
+          <button className="dock-action payout" disabled={ticketSubmitting} onClick={() => setPayoutOpen(true)} type="button">
+            <FaMoneyBillWave /><span>PAYOUT</span>
+          </button>
+          <button
+            aria-label={ticketSubmitting ? 'Placing bet' : 'Print ticket'}
+            className="dock-action print"
+            disabled={isBettingClosed || ticketSubmitting || slip.length === 0 || Number(stake) <= 0}
+            onClick={submitTicket}
+            title={ticketSubmitting ? 'Placing bet' : 'Print ticket'}
+            type="button"
+          >
+            {ticketSubmitting ? <span className="receipt-action-loading">…</span> : <FaPrint aria-hidden="true" />}
+            <span>PRINT</span>
+          </button>
+        </div>
       </footer>
+      <TicketCancelModal
+        initialTicketNumber={cancelTicketNumber}
+        open={cancelTicketOpen}
+        onClose={() => setCancelTicketOpen(false)}
+      />
+      <TicketPayoutModal
+        open={payoutOpen}
+        onCancelTicket={(ticketNumber) => {
+          setPayoutOpen(false);
+          setCancelTicketNumber(ticketNumber);
+          setCancelTicketOpen(true);
+        }}
+        onClose={() => setPayoutOpen(false)}
+      />
+
       {placedTicket && (
         <div className="ticket-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="ticket-success-title">
           <div className="ticket-modal">

@@ -2,7 +2,12 @@ import {useCallback, useEffect, useState} from 'react';
 import {Grid, TicketsPage} from './components';
 import TerminalLogin from './components/auth/TerminalLogin';
 import TerminalStatus from './components/auth/TerminalStatus';
-import {isTerminalAuthenticated, TERMINAL_AUTH_CHANGED_EVENT} from './auth/terminalAuth';
+import {
+  getTerminalSession,
+  isTerminalAuthenticated,
+  logoutTerminal,
+  TERMINAL_AUTH_CHANGED_EVENT,
+} from './auth/terminalAuth';
 
 const readLocation = () => ({path: window.location.pathname, search: window.location.search});
 
@@ -42,13 +47,25 @@ function App() {
     return <TerminalLogin onAuthenticated={() => setAuthenticated(true)} />;
   }
 
-  const content = location.path.startsWith('/tickets')
+  const ticketsOpen = location.path.startsWith('/tickets');
+  const terminal = getTerminalSession()?.terminal;
+  const logout = () => {
+    logoutTerminal();
+    navigate('/login', {replace: true});
+  };
+  const content = ticketsOpen
     ? <TicketsPage onBackToDisplay={() => navigate('/')} />
-    : <Grid onOpenTickets={() => navigate('/tickets')} />;
+    : (
+      <Grid
+        onLogout={logout}
+        onOpenTickets={() => navigate('/tickets')}
+        terminal={terminal}
+      />
+    );
 
   return (
     <div className="App">
-      <TerminalStatus onLogout={() => navigate('/login', {replace: true})} />
+      {ticketsOpen && <TerminalStatus onLogout={() => navigate('/login', {replace: true})} />}
       {content}
     </div>
   );
