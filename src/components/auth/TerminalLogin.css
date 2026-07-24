@@ -1,8 +1,6 @@
 .terminal-login-page { min-height: 100vh; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 28px; color: #f5f5f5; background: radial-gradient(circle at 50% 30%, #171717 0, #090909 48%, #020202 100%); }
 .terminal-login-shell { position: relative; width: min(1080px, 100%); box-sizing: border-box; padding: 26px 52px 34px; border: 1px solid #202020; border-radius: 8px; background: #101010; box-shadow: 0 24px 80px #000; overflow: hidden; }
 .terminal-login-shell::before { content: ''; position: absolute; top: 0; left: 0; width: 150px; height: 110px; background: #ffae00; clip-path: polygon(0 0, 100% 0, 0 100%); }
-.terminal-login-brand { position: absolute; z-index: 1; top: 17px; left: 19px; display: grid; color: white; font-weight: 900; font-size: 18px; line-height: 1; }
-.terminal-login-brand svg { font-size: 27px; }
 .terminal-login-header { display: flex; align-items: center; justify-content: center; gap: 14px; color: #ffad20; }
 .terminal-login-header h1 { margin: 0 0 28px; font-size: clamp(27px, 3vw, 40px); letter-spacing: 1.5px; }
 .terminal-login-header > svg { margin-bottom: 28px; font-size: 25px; }

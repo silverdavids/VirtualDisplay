@@ -487,6 +487,29 @@ const styles = `
     border-bottom: 2px solid #d80000;
   }
 
+  .header-brand {
+    flex: 0 0 112px;
+    min-width: 0;
+    min-height: 0;
+    height: 100%;
+    display: grid;
+    place-items: center;
+    padding: 3px 8px;
+    box-sizing: border-box;
+    border-right: 1px solid #292929;
+    background: #050505;
+    overflow: hidden;
+  }
+
+  .header-brand img {
+    display: block;
+    width: auto;
+    max-width: 100%;
+    height: auto;
+    max-height: 52px;
+    object-fit: contain;
+  }
+
   .competition-tabs {
     display: flex;
     flex: 1 1 auto;
@@ -1602,6 +1625,7 @@ const styles = `
 
   @media (max-width: 1050px) {
     .betting-board { --pre-odds-width: 255px; }
+    .header-brand { flex-basis: 70px; padding-inline: 4px; }
     .header-metric-label,
     .header-action-label,
     .header-terminal-identity small { display: none; }
@@ -1625,6 +1649,7 @@ const styles = `
       grid-template-rows: 58px minmax(0, 1fr) 68px;
     }
     .terminal-topbar { height: 58px; }
+    .header-brand img { max-height: 50px; }
     .odds-area {
       grid-template-rows: 124px minmax(0, 1fr);
       padding-top: 5px;
@@ -2733,6 +2758,9 @@ const Grid = ({onLogout, onOpenTickets, terminal}) => {
       </div>
 
       <section className="terminal-topbar">
+        <div className="header-brand">
+          <img alt="VPLAY" src={`${process.env.PUBLIC_URL}/vplay-logo.png`} />
+        </div>
         <nav className="competition-tabs" aria-label="Competitions">
           {leagues.map((league) => (
             <button

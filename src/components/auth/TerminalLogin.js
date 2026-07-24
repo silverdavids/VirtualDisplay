@@ -49,7 +49,6 @@ const TerminalLogin = ({onAuthenticated}) => {
   return (
     <main className="terminal-login-page">
       <section className="terminal-login-shell" aria-labelledby="terminal-login-title">
-        <div className="terminal-login-brand"><FaTv /><span>VD</span></div>
         <header className="terminal-login-header">
           <FaKey aria-hidden="true" />
           <h1 id="terminal-login-title">AUTHENTICATION</h1>
