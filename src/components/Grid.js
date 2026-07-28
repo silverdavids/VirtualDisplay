@@ -15,12 +15,6 @@ import {
   FaTrophy,
 } from 'react-icons/fa';
 import {
-  getFullTimeOddsMatchResult,
-  getFullTimeOddsUnderOver,
-  getGoalGoalOdds,
-} from '../functions';
-import {MARKET_BTS, MARKET_DC} from '../markets';
-import {
   BETTING_CLOSED_MESSAGE,
   placeVirtualTicket,
   validateVirtualTicket,
@@ -44,26 +38,29 @@ const REST_FALLBACK_INTERVAL_MS = 4000;
 const normalizeProviderToken = (provider) =>
   String(provider || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
-const marketGroups = [
-  {title: 'MAIN', labels: ['1', 'X', '2']},
-  {title: 'OVER / UNDER', labels: []},
-  {title: 'HOME OV/UN', labels: ['1X', '12', 'X2']},
-  {title: 'AWAY OV/UN', labels: []},
-  {title: '1X2 OV/UN 1.5', labels: ['GG', 'NG']},
-  {title: '1X2 OV/UN 2.5', labels: ['OV 2.5', 'UN 2.5']},
+const MARKET_TITLES = {
+  '1X2': 'MAIN',
+  DC: 'DOUBLE CHANCE',
+  OU: 'OVER / UNDER',
+  HOME_OU: 'HOME OV/UN',
+  AWAY_OU: 'AWAY OV/UN',
+  '1X2_OU_1.5': '1X2 OV/UN 1.5',
+  '1X2_OU_2.5': '1X2 OV/UN 2.5',
+  BTS: 'GG / NG',
+};
+const DISPLAY_MARKETS = [
+  {code: 'MAIN', title: 'MAIN'},
+  {code: 'OU', title: 'OVER / UNDER'},
+  {code: 'HOME_OU', title: 'HOME OV/UN'},
+  {code: 'AWAY_OU', title: 'AWAY OV/UN'},
+  {code: '1X2_OU_1.5', title: '1X2 OV/UN 1.5'},
+  {code: '1X2_OU_2.5', title: '1X2 OV/UN 2.5'},
 ];
-
-const oddLabels = marketGroups.flatMap((group) => group.labels);
-
-const oddDescriptors = marketGroups.flatMap((group) =>
-  group.labels.map((label) => ({
-    market: group.title,
-    option: label,
-  }))
-);
-
-const getOddDescriptor = (oddIndex) =>
-  oddDescriptors[oddIndex] ?? {market: 'UNKNOWN', option: oddLabels[oddIndex] ?? ''};
+const MARKET_SELECTION_ORDER = {
+  '1X2': ['1', 'X', '2'],
+  DC: ['1X', '12', 'X2'],
+  BTS: ['GG', 'NG'],
+};
 
 const getArrayFromPayload = (payload, keys) => {
   if (Array.isArray(payload)) return payload;
@@ -86,118 +83,167 @@ const normalizeLeague = (league) => ({
   name: league.name ?? league.leagueName ?? league.title ?? league.shortName ?? `League ${league.id ?? ''}`,
 });
 
-const normalizeToken = (value) =>
+export const normalizeToken = (value) =>
   String(value ?? '').toUpperCase().replace(/[^A-Z0-9.]/g, '');
 
 const getSelectionName = (selection) =>
-  selection?.name ?? selection?.label ?? selection?.code ?? selection?.n ?? selection?.key ?? selection?.outcome ?? '';
+  selection?.name ?? selection?.selectionName ?? selection?.label ?? selection?.selectionCode ??
+  selection?.code ?? selection?.n ?? selection?.key ?? selection?.outcome ?? selection?.s ?? '';
 
 const getSelectionOdd = (selection) =>
-  selection?.odd ?? selection?.odds ?? selection?.price ?? selection?.value ?? selection?.v ?? selection?.Odd;
+  selection?.odd ?? selection?.odds ?? selection?.price ?? selection?.value ?? selection?.v ??
+  selection?.Odd ?? selection?.Value;
 
-const setSelectionValue = (target, keys, selection) => {
-  const rawSelectionToken = normalizeToken(getSelectionName(selection));
-  const selectionToken = rawSelectionToken === 'OV'
-    ? 'OVER'
-    : rawSelectionToken === 'UN'
-      ? 'UNDER'
-      : rawSelectionToken;
-  const odd = getSelectionOdd(selection);
-  if (odd === undefined || odd === null || odd === '') return;
+const getRawMarketCode = (market) =>
+  market?.code ?? market?.marketCode ?? market?.market_code ?? market?.n ?? market?.name ?? market?.key ?? '';
 
-  for (const key of keys) {
-    if (selectionToken === normalizeToken(key)) {
-      target[key] = odd;
-      return;
-    }
-  }
+const getMarketLine = (market, code = '') => {
+  const directLine = market?.line ?? market?.goalLine ?? market?.handicap ?? market?.h;
+  if (directLine !== undefined && directLine !== null && directLine !== '') return Number(directLine);
+  const codeLines = [...String(code).matchAll(/\d+(?:\.\d+)?/g)];
+  return codeLines.length > 0 ? Number(codeLines.at(-1)[0]) : null;
 };
 
-const getMarketCode = (market) => normalizeToken(market?.code ?? market?.marketCode ?? market?.n ?? market?.name ?? market?.key);
+export const getCanonicalMarketCode = (market) => {
+  const rawCode = getRawMarketCode(market);
+  const token = normalizeToken(rawCode);
+  const line = getMarketLine(market, rawCode);
+
+  if (['1X2', 'MATCHRESULT', 'MAIN', 'FULLTIMERESULT'].includes(token)) return '1X2';
+  if (['DC', 'DOUBLECHANCE'].includes(token)) return 'DC';
+  if (['BTS', 'BTTS', 'GGNG', 'GOALGOAL', 'BOTHTEAMSTOSCORE'].includes(token)) return 'BTS';
+  if (['OU', 'OVERUNDER', 'TOTALGOALS'].includes(token)) return 'OU';
+  if (['HOMEOU', 'HOMEOVERUNDER', 'HOMETOTAL', 'TEAM1OU', '1OU'].includes(token)) return 'HOME_OU';
+  if (['AWAYOU', 'AWAYOVERUNDER', 'AWAYTOTAL', 'TEAM2OU', '2OU'].includes(token)) return 'AWAY_OU';
+  if (['RESULTOVERUNDER15', 'RESULTOU15', '1X2OU15'].includes(token)) return '1X2_OU_1.5';
+  if (['RESULTOVERUNDER25', 'RESULTOU25', '1X2OU25'].includes(token)) return '1X2_OU_2.5';
+  if (token.includes('1X2') && (token.includes('OU') || token.includes('OVERUNDER'))) {
+    return line === 1.5 ? '1X2_OU_1.5' : line === 2.5 ? '1X2_OU_2.5' : `1X2_OU_${line ?? token}`;
+  }
+
+  return token || 'UNKNOWN';
+};
 
 const getMarketSelections = (market) => {
   if (Array.isArray(market?.selections)) return market.selections;
   if (Array.isArray(market?.selection)) return market.selection;
   if (Array.isArray(market?.outcomes)) return market.outcomes;
+  if (Array.isArray(market?.options)) return market.options;
   if (Array.isArray(market?.o)) return market.o;
   return [];
 };
 
-const hasAnyMarketValue = (markets) =>
-  Object.values(markets).some((market) => (
-    market &&
-    typeof market === 'object' &&
-    Object.values(market).some((value) => value !== undefined && value !== null && value !== '')
-  ));
-
-const normalizeMarkets = (markets) => {
-  if (!markets) return {};
-
-  if (!Array.isArray(markets)) {
-    const normalized = {
-      main: markets.main ?? markets['1X2'] ?? markets['1x2'] ?? markets.matchResult ?? markets.result ?? {},
-      doubleChance: markets.doubleChance ?? markets.DC ?? markets.dc ?? {},
-      bts: markets.bts ?? markets.BTS ?? markets.goalGoal ?? {},
-      overUnder: markets.overUnder ?? markets.OU ?? markets.ou ?? {},
-    };
-
-    return hasAnyMarketValue(normalized) ? normalized : {};
-  }
-
-  const normalized = markets.reduce((nextMarkets, market) => {
-    const code = getMarketCode(market);
-    const selections = getMarketSelections(market);
-
-    if (code === '1X2') {
-      selections.forEach((selection) => setSelectionValue(nextMarkets.main, ['1', 'X', '2', 'home', 'draw', 'away'], selection));
-    }
-
-    if (code === 'DC') {
-      selections.forEach((selection) => setSelectionValue(nextMarkets.doubleChance, ['1X', '12', 'X2', 'homeDraw', 'homeAway', 'drawAway'], selection));
-    }
-
-    if (code === 'BTS') {
-      selections.forEach((selection) => setSelectionValue(nextMarkets.bts, ['GG', 'NG', 'yes', 'no'], selection));
-    }
-
-    if (code === 'OU') {
-      selections.forEach((selection) => setSelectionValue(nextMarkets.overUnder, ['OV 2.5', 'OV2.5', 'OVER2.5', 'UN 2.5', 'UN2.5', 'UNDER2.5', 'over', 'under'], selection));
-    }
-
-    return nextMarkets;
-  }, {
-    main: {},
-    doubleChance: {},
-    bts: {},
-    overUnder: {},
-  });
-
-  return hasAnyMarketValue(normalized) ? normalized : {};
+const selectionAliases = {
+  HOME: '1', DRAW: 'X', AWAY: '2',
+  HOMEDRAW: '1X', HOMEAWAY: '12', DRAWAWAY: 'X2',
+  YES: 'GG', NO: 'NG', O: 'OV', U: 'UN', OVER: 'OV', UNDER: 'UN',
 };
 
-const getFlattenedMarkets = (event) => {
-  const normalized = {
-    main: event.main ?? event.matchResult ?? event['1X2'] ?? {
-      1: event['1'] ?? event.homeOdd,
-      X: event.X ?? event.x ?? event.drawOdd,
-      2: event['2'] ?? event.awayOdd,
-    },
-    doubleChance: event.doubleChance ?? {
-      '1X': event['1X'] ?? event.homeDraw,
-      12: event['12'] ?? event.homeAway,
-      X2: event.X2 ?? event.x2 ?? event.drawAway,
-    },
-    bts: event.bts ?? {
-      GG: event.GG ?? event.gg,
-      NG: event.NG ?? event.ng,
-    },
-    overUnder: event.overUnder ?? {
-      'OV 2.5': event['OV 2.5'] ?? event.OV25 ?? event.over25 ?? event.over,
-      'UN 2.5': event['UN 2.5'] ?? event.UN25 ?? event.under25 ?? event.under,
-    },
-  };
+const getCanonicalSelectionLabel = (selection, marketCode, line, index) => {
+  const rawName = getSelectionName(selection);
+  let token = normalizeToken(rawName);
+  token = selectionAliases[token] ?? token;
+  token = token.replace(/^OVER/, 'OV').replace(/^UNDER/, 'UN');
 
-  return hasAnyMarketValue(normalized) ? normalized : {};
+  const fixedOrder = MARKET_SELECTION_ORDER[marketCode];
+  if (!token && fixedOrder) token = fixedOrder[index] ?? '';
+  if (
+    ['OU', 'HOME_OU', 'AWAY_OU'].includes(marketCode) &&
+    Number.isFinite(line) &&
+    (!token || /^\d+$/.test(token))
+  ) {
+    token = index === 0 ? 'UN' : 'OV';
+  }
+  if ((token === 'OV' || token === 'UN') && Number.isFinite(line)) token = `${token}${line}`;
+  if (marketCode.startsWith('1X2_OU_') && token && !token.includes('+')) {
+    const result = token.match(/^(1|X|2)/)?.[1];
+    const total = token.match(/(OV|UN)/)?.[1];
+    if (result && total) token = `${result}+${total}${line ?? ''}`;
+  }
+
+  return token || String(rawName || index + 1).toUpperCase();
+};
+
+const MARKET_METADATA_KEYS = new Set([
+  'CODE', 'MARKETCODE', 'MARKET_CODE', 'NAME', 'MARKETNAME', 'KEY',
+  'LINE', 'GOALLINE', 'HANDICAP', 'H', 'TITLE',
+]);
+
+const objectSelections = (market) => Object.entries(market ?? {})
+  .filter(([key, odd]) => (
+    !MARKET_METADATA_KEYS.has(String(key).toUpperCase()) &&
+    odd !== undefined &&
+    odd !== null &&
+    odd !== '' &&
+    typeof odd !== 'object'
+  ))
+  .map(([name, odd]) => ({name, odd}));
+
+const normalizeMarket = (market) => {
+  const code = getCanonicalMarketCode(market);
+  const line = getMarketLine(market, getRawMarketCode(market));
+  const rawSelections = getMarketSelections(market);
+  const selections = (rawSelections.length > 0 ? rawSelections : objectSelections(market))
+    .map((selection, index) => ({
+      key: `${code}:${getCanonicalSelectionLabel(selection, code, line, index)}`,
+      label: getCanonicalSelectionLabel(selection, code, line, index),
+      odd: getSelectionOdd(selection),
+      marketCode: code,
+      marketName: getRawMarketCode(market) || MARKET_TITLES[code] || code,
+      line,
+      matchOddId: selection?.matchOddId ?? selection?.oddId ?? selection?.id ?? null,
+    }))
+    .filter(({odd}) => odd !== undefined && odd !== null && odd !== '');
+
+  return {code, line, name: getRawMarketCode(market) || MARKET_TITLES[code] || code, selections};
+};
+
+const objectMarketEntries = (markets) => {
+  const aliases = {
+    main: '1X2', matchResult: '1X2', result: '1X2', doubleChance: 'DC',
+    dc: 'DC', bts: 'BTS', goalGoal: 'BTS', overUnder: 'OU', ou: 'OU',
+    homeOverUnder: 'HOME_OU', homeOu: 'HOME_OU', awayOverUnder: 'AWAY_OU', awayOu: 'AWAY_OU',
+    resultOverUnder15: '1X2_OU_1.5', resultOverUnder25: '1X2_OU_2.5',
+  };
+  return Object.entries(markets ?? {}).map(([key, value]) => (
+    Array.isArray(value)
+      ? {code: aliases[key] ?? key, selections: value}
+      : {...(value && typeof value === 'object' ? value : {}), code: aliases[key] ?? key}
+  ));
+};
+
+const getFlattenedMarketEntries = (event) => [
+  {code: '1X2', selections: [
+    {name: '1', odd: event['1'] ?? event.homeOdd},
+    {name: 'X', odd: event.X ?? event.x ?? event.drawOdd},
+    {name: '2', odd: event['2'] ?? event.awayOdd},
+  ]},
+  {code: 'DC', selections: [
+    {name: '1X', odd: event['1X'] ?? event.homeDraw},
+    {name: '12', odd: event['12'] ?? event.homeAway},
+    {name: 'X2', odd: event.X2 ?? event.x2 ?? event.drawAway},
+  ]},
+  {code: 'BTS', selections: [
+    {name: 'GG', odd: event.GG ?? event.gg},
+    {name: 'NG', odd: event.NG ?? event.ng},
+  ]},
+  {code: 'OU', line: 2.5, selections: [
+    {name: 'OV', odd: event['OV 2.5'] ?? event.OV25 ?? event.over25 ?? event.over},
+    {name: 'UN', odd: event['UN 2.5'] ?? event.UN25 ?? event.under25 ?? event.under},
+  ]},
+];
+
+export const normalizeBlocked = (value) =>
+  ['0', 'FALSE', 'NO', ''].includes(String(value ?? 0).trim().toUpperCase()) ? 0 : 1;
+
+export const normalizeEventMarkets = (event) => {
+  const source = event.markets
+    ? (Array.isArray(event.markets) ? event.markets : objectMarketEntries(event.markets))
+    : Array.isArray(event.odds) && event.odds.length > 0
+      ? event.odds.map((market) => ({...market, selections: market.selections ?? market.o}))
+      : getFlattenedMarketEntries(event);
+
+  return source.map(normalizeMarket).filter(({selections}) => selections.length > 0);
 };
 
 const normalizeEvent = (event) => ({
@@ -205,9 +251,9 @@ const normalizeEvent = (event) => ({
   id: event.id ?? event.eventId ?? event.betServiceMatchNo ?? `${event.homeTeam}-${event.awayTeam}`,
   home: event.home ?? event.homeTeam ?? event.homeName ?? event.homeTeamName ?? '',
   away: event.away ?? event.awayTeam ?? event.awayName ?? event.awayTeamName ?? '',
-  markets: event.markets ? normalizeMarkets(event.markets) : getFlattenedMarkets(event),
+  marketPages: normalizeEventMarkets(event),
   odds: Array.isArray(event.odds) ? event.odds : [],
-  blocked: event.blocked ?? 0,
+  blocked: normalizeBlocked(event.blocked),
 });
 
 const formatOdd = (odd) => {
@@ -216,58 +262,104 @@ const formatOdd = (odd) => {
   return Number.isFinite(value) ? value.toFixed(2) : odd;
 };
 
-const getMarketOdds = (odds, marketName) => {
-  const market = odds.find(({n}) => n === marketName);
-  return market?.o?.map(({v}) => v) ?? [];
+const selectionSortValue = (code, label) => {
+  const fixedIndex = MARKET_SELECTION_ORDER[code]?.indexOf(label);
+  if (fixedIndex !== undefined && fixedIndex >= 0) return fixedIndex;
+  const numericParts = [...label.matchAll(/\d+(?:\.\d+)?/g)];
+  const line = Number(numericParts.at(-1)?.[0] ?? 0);
+  const totalType = label.includes('UN') ? 1 : 0;
+  const result = label.match(/^(1|X|2)/)?.[1];
+  const resultIndex = ['1', 'X', '2'].indexOf(result);
+  if (code.startsWith('1X2_OU_')) return Math.max(0, resultIndex) * 10 + totalType;
+  if (['OU', 'HOME_OU', 'AWAY_OU'].includes(code)) return line * 10 + totalType;
+  return 1000;
 };
 
-const getMarketValue = (market, keys) => {
-  if (!market || typeof market !== 'object') return undefined;
-
-  for (const key of keys) {
-    if (market[key] !== undefined) return market[key];
-  }
-
-  return undefined;
+const isAdditionalOverUnderSelection = ({label, line}) => {
+  const goalLine = line ?? getLineFromOption(label);
+  return /^(OV|UN)\d+(?:\.\d+)?$/.test(label) &&
+    Number.isFinite(goalLine) &&
+    goalLine >= 1.5 &&
+    goalLine !== 2.5 &&
+    Math.abs(goalLine % 1) === 0.5;
 };
 
-const fillMarket = (values, size) => {
-  const padded = [...values];
-  while (padded.length < size) padded.push('-');
-  return padded.slice(0, size);
+export const buildMarketTabs = (events) => {
+  const markets = events.flatMap(({marketPages = []}) => marketPages);
+  const getSelections = (codes, predicate = () => true) => {
+    const selections = new Map();
+    codes.forEach((code) => {
+      markets
+        .filter((market) => market.code === code)
+        .flatMap(({selections: marketSelections}) => marketSelections)
+        .filter(predicate)
+        .sort((a, b) => selectionSortValue(code, a.label) - selectionSortValue(code, b.label))
+        .forEach((selection) => {
+          if (!selections.has(selection.key)) selections.set(selection.key, selection);
+        });
+    });
+    return [...selections.values()];
+  };
+  const fixedSelections = (code, labels) => {
+    const available = new Map(getSelections([code]).map((selection) => [selection.label, selection]));
+    const line = code.startsWith('1X2_OU_') ? Number(code.split('_').at(-1)) : NaN;
+    return labels.map((label) => available.get(label) ?? {
+      key: `${code}:${label}`,
+      label,
+      marketCode: code,
+      marketName: MARKET_TITLES[code] || code,
+      line: Number.isFinite(line) ? line : getLineFromOption(label),
+    });
+  };
+
+  return DISPLAY_MARKETS.map((tab) => {
+    let selections;
+    let availableCount;
+    if (tab.code === 'MAIN') {
+      const mainAvailable = [
+        ...getSelections(['1X2']),
+        ...getSelections(['DC']),
+        ...getSelections(['BTS']),
+        ...getSelections(['OU'], ({label, line}) => (line ?? getLineFromOption(label)) === 2.5),
+      ];
+      selections = [
+        ...fixedSelections('1X2', ['1', 'X', '2']),
+        ...fixedSelections('DC', ['1X', '12', 'X2']),
+        ...fixedSelections('BTS', ['GG', 'NG']),
+        ...fixedSelections('OU', ['OV2.5', 'UN2.5']),
+      ];
+      availableCount = mainAvailable.length;
+    } else if (tab.code === '1X2_OU_1.5' || tab.code === '1X2_OU_2.5') {
+      const line = tab.code.endsWith('1.5') ? '1.5' : '2.5';
+      const labels = ['1', 'X', '2'].flatMap((result) => [`${result}+OV${line}`, `${result}+UN${line}`]);
+      const available = getSelections([tab.code]);
+      selections = fixedSelections(tab.code, labels);
+      availableCount = available.length;
+    } else if (tab.code === 'OU') {
+      selections = getSelections(['OU'], isAdditionalOverUnderSelection);
+      availableCount = selections.length;
+    } else {
+      selections = getSelections([tab.code]);
+      availableCount = selections.length;
+    }
+    return {...tab, disabled: availableCount === 0, selections};
+  });
 };
 
-const getDisplayOdds = (match) => {
-  if (match.blocked !== 0) return Array(10).fill('-');
+const getVisualMarketLabel = (tabCode, label) => {
+  if (tabCode.startsWith('1X2_OU_')) return label.replace(/\d+(?:\.\d+)?$/, '').replace('+', ' ');
+  return label.replace(/^(OV|UN)(\d)/, '$1 $2');
+};
 
-  if (match.markets && Object.keys(match.markets).length > 0) {
-    const {main = {}, doubleChance = {}, bts = {}, overUnder = {}} = match.markets;
+const getDisplaySelections = (match, tab) => {
+  if (!tab) return [];
+  const selections = match.marketPages.flatMap(({selections: marketSelections}) => marketSelections);
+  const byKey = new Map(selections.map((selection) => [selection.key, selection]));
 
-    return [
-      getMarketValue(main, ['1', 'home']),
-      getMarketValue(main, ['X', 'x', 'draw']),
-      getMarketValue(main, ['2', 'away']),
-      getMarketValue(doubleChance, ['1X', '1x', 'homeDraw']),
-      getMarketValue(doubleChance, ['12', 'homeAway']),
-      getMarketValue(doubleChance, ['X2', 'x2', 'drawAway']),
-      getMarketValue(bts, ['GG', 'gg', 'yes']),
-      getMarketValue(bts, ['NG', 'ng', 'no']),
-      getMarketValue(overUnder, ['OV 2.5', 'OV2.5', 'over2.5', 'over']),
-      getMarketValue(overUnder, ['UN 2.5', 'UN2.5', 'under2.5', 'under']),
-    ].map(formatOdd);
-  }
-
-  const matchResult = getFullTimeOddsMatchResult(match.odds).map(({v}) => v);
-  const doubleChance = getMarketOdds(match.odds, MARKET_DC);
-  const goalGoal = getGoalGoalOdds(match.odds, MARKET_BTS).map(({v}) => v);
-  const overUnder = getFullTimeOddsUnderOver(match.odds).wireOdds.map(({v}) => v);
-
-  return [
-    ...fillMarket(matchResult, 3),
-    ...fillMarket(doubleChance, 3),
-    ...fillMarket(goalGoal, 2),
-    ...fillMarket(overUnder, 2),
-  ].map(formatOdd);
+  return tab.selections.map((metadata) => {
+    const selection = byKey.get(metadata.key);
+    return {...metadata, ...selection, odd: match.blocked !== 0 ? '-' : formatOdd(selection?.odd)};
+  });
 };
 
 const getLeagueName = (league) => league?.name ?? 'Virtual League';
@@ -451,7 +543,10 @@ const styles = `
     --pre-odds-width: 448px;
     --odds-gap: 10px;
     --odds-cell: minmax(70px, 1fr);
+    --receipt-panel-width: 320px;
     min-height: 100vh;
+    max-width: 100%;
+    box-sizing: border-box;
     background: #202020;
     color: #fff;
     font-family: "Arial Narrow", Impact, "Segoe UI Condensed", Arial, sans-serif;
@@ -641,8 +736,9 @@ const styles = `
 
   .terminal-body {
     display: grid;
-    grid-template-columns: minmax(940px, 1fr) 320px;
+    grid-template-columns: minmax(0, 1fr) var(--receipt-panel-width);
     align-items: stretch;
+    min-width: 0;
   }
 
   .odds-area {
@@ -847,14 +943,18 @@ const styles = `
 
   .market-tabs {
     display: grid;
-    grid-template-columns: repeat(10, var(--odds-cell));
+    grid-template-columns: repeat(var(--market-tab-count, 1), minmax(0, 1fr));
     gap: var(--odds-gap);
     width: 100%;
     margin-top: 0;
     border-top: 1px solid #000;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: thin;
   }
 
   .market-tab {
+    min-width: 0;
     height: 40px;
     display: grid;
     place-items: center;
@@ -864,47 +964,27 @@ const styles = `
     color: #fff;
     font-size: 17px;
     font-weight: 800;
+    padding: 0 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
   }
 
   .market-tab.active {
     background: #d90000;
   }
 
-  .market-tab:nth-child(1) {
-    grid-column: span 3;
-  }
-
-  .market-tab:nth-child(2),
-  .market-tab:nth-child(4) {
-    display: none;
-  }
-
-  .market-tab:nth-child(3) {
-    grid-column: span 3;
-  }
-
-  .market-tab:nth-child(5),
-  .market-tab:nth-child(6) {
-    grid-column: span 2;
+  .market-tab:disabled {
+    opacity: 0.42;
+    cursor: not-allowed;
   }
 
   .market-labels {
     display: grid;
-    grid-template-columns: repeat(10, var(--odds-cell));
+    grid-template-columns: repeat(var(--market-selection-count, 1), minmax(0, 1fr));
     gap: var(--odds-gap);
     padding: 4px 10px 8px 0;
-  }
-
-  .market-label-group {
-    display: contents;
-  }
-
-  .market-label-group.three {
-    grid-template-columns: repeat(3, 1fr);
-  }
-
-  .market-label-group.two {
-    grid-template-columns: repeat(2, 1fr);
   }
 
   .market-label {
@@ -1028,6 +1108,56 @@ const styles = `
     justify-self: center;
   }
 
+  .row-details-button {
+    display: grid;
+    place-items: center;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+  }
+
+  .more-markets-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 32;
+    display: grid;
+    place-items: center;
+    background: rgba(0, 0, 0, .68);
+  }
+
+  .more-markets-dialog {
+    width: min(680px, calc(100vw - 32px));
+    max-height: min(720px, calc(100vh - 32px));
+    overflow-y: auto;
+    border: 2px solid #d90000;
+    background: #181818;
+    color: #fff;
+    font-family: "Segoe UI", Arial, sans-serif;
+  }
+
+  .more-markets-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    background: #d90000;
+  }
+
+  .more-markets-close {
+    border: 0;
+    background: transparent;
+    color: #fff;
+    font-size: 24px;
+    cursor: pointer;
+  }
+
+  .more-market-section { padding: 12px 16px; border-bottom: 1px solid #353535; }
+  .more-market-section h3 { margin: 0 0 8px; }
+  .more-market-selections { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 7px; }
+  .more-market-selection { display: flex; justify-content: space-between; gap: 8px; padding: 8px; background: #292929; }
+
   .crest {
     width: 56px;
     height: 56px;
@@ -1046,7 +1176,7 @@ const styles = `
 
   .odds-grid {
     display: grid;
-    grid-template-columns: repeat(10, var(--odds-cell));
+    grid-template-columns: repeat(var(--market-selection-count, 1), minmax(0, 1fr));
     gap: var(--odds-gap);
     align-items: center;
     min-width: 0;
@@ -1092,7 +1222,11 @@ const styles = `
 
   .bet-slip {
     position: relative;
+    min-width: 0;
     min-height: calc(100vh - 72px);
+    width: var(--receipt-panel-width);
+    max-width: 100%;
+    box-sizing: border-box;
     background: #202020;
     border-left: 3px solid #d80000;
   }
@@ -1182,6 +1316,7 @@ const styles = `
   }
 
   .receipt {
+    min-width: 0;
     color: #f4f4f4;
     font-family: "Segoe UI", Arial, sans-serif;
   }
@@ -1250,6 +1385,7 @@ const styles = `
   }
 
   .receipt-summary {
+    min-width: 0;
     padding: 12px;
     background: #1c1c1c;
   }
@@ -1310,10 +1446,14 @@ const styles = `
   }
 
   .receipt-actions {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
+    display: flex;
     gap: 8px;
     margin-top: 12px;
+  }
+
+  .receipt-actions button {
+    flex: 1 1 0;
+    min-width: 0;
   }
 
   .ticket-status {
@@ -1431,6 +1571,8 @@ const styles = `
   }
 
   .receipt-action {
+    flex: 1 1 0;
+    min-width: 0;
     height: 42px;
     border: 0;
     color: #fff;
@@ -1494,7 +1636,7 @@ const styles = `
   .terminal-body {
     min-height: 0;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) clamp(290px, 22vw, 350px);
+    grid-template-columns: minmax(0, 1fr) var(--receipt-panel-width);
   }
   .odds-area { height: 100%; display: grid; grid-template-rows: 145px minmax(0, 1fr); padding: 8px 14px 10px; box-sizing: border-box; }
   .market-layout { grid-template-columns: var(--pre-odds-width) minmax(0, 1fr); gap: 20px; min-height: 0; }
@@ -1538,6 +1680,7 @@ const styles = `
     display: block;
     min-height: 0;
     height: 100%;
+    width: var(--receipt-panel-width);
     overflow: hidden;
     border-left: 2px solid #b90000;
     background: #1b1b1b;
@@ -1598,17 +1741,19 @@ const styles = `
   .receipt-win { margin-top: 6px; padding: 5px; }
   .receipt-win span { font-size: 10px; }
   .receipt-win strong { font-size: 19px; }
-  .receipt-actions { position: static; gap: 5px; margin-top: 6px; }
+  .receipt-actions { position: static; display: flex; gap: 5px; margin-top: 6px; }
+  .receipt-actions button { flex: 1 1 0; min-width: 0; }
   .receipt-action { height: 42px; font-size: 21px; }
   .receipt-action svg { display: block; margin: auto; }
 
-  .virtual-display-footer { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: stretch; padding: 0; border-top: 1px solid #2b2b2b; color: #aaa; background: #090909; font: 13px "Segoe UI", Arial, sans-serif; }
-  .footer-meta { display: grid; grid-template-columns: 1fr 1fr 1fr; align-items: center; padding: 0 18px; }
+  .virtual-display-footer { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) var(--receipt-panel-width); align-items: stretch; box-sizing: border-box; padding: 0 0 env(safe-area-inset-bottom, 0px); border-top: 1px solid #2b2b2b; color: #aaa; background: #090909; font: 13px "Segoe UI", Arial, sans-serif; }
+  .footer-meta { min-width: 0; display: grid; grid-template-columns: 1fr 1fr 1fr; align-items: center; padding: 0 18px; overflow: hidden; }
   .footer-meta span:nth-child(2) { text-align: center; }
   .footer-meta span:last-child { text-align: right; }
   .secure-dot { color: #25b818; }
-  .display-action-dock { display: grid; grid-template-columns: repeat(4, minmax(104px, 1fr)); min-width: min(42vw, 520px); }
-  .dock-action { display: grid; grid-template-rows: 1fr auto; place-items: center; gap: 2px; border: 0; border-left: 2px solid rgba(0,0,0,.35); color: #fff; font: 900 14px "Arial Narrow", Impact, sans-serif; cursor: pointer; }
+  .display-action-dock { width: 100%; min-width: 0; display: flex; }
+  .display-action-dock button { flex: 1 1 0; min-width: 0; }
+  .dock-action { flex: 1 1 0; min-width: 0; display: grid; grid-template-rows: 1fr auto; place-items: center; gap: 2px; padding-inline: 4px; border: 0; border-left: 2px solid rgba(0,0,0,.35); color: #fff; font: 900 14px "Arial Narrow", Impact, sans-serif; cursor: pointer; }
   .dock-action svg { font-size: 31px; }
   .dock-action.clear { background: linear-gradient(#e30a0a,#b30000); }
   .dock-action.search { background: linear-gradient(#1699c8,#0878a5); }
@@ -1632,13 +1777,12 @@ const styles = `
     .header-terminal-identity { min-width: 78px; max-width: 105px; padding-inline: 5px; }
     .odds-area { padding-inline: 6px; }
     .market-layout { gap: 8px; }
-    .terminal-body { grid-template-columns: minmax(0, 1fr) 280px; }
+    .terminal-body { grid-template-columns: minmax(0, 1fr) var(--receipt-panel-width); }
     .match-row, .match-row:nth-child(odd) { grid-template-columns: 24px 34px minmax(36px, 1fr) 18px 34px minmax(36px, 1fr) 20px minmax(0, 1fr); }
     .team-code { font-size: 14px; }
     .footer-meta span:first-child,
     .footer-meta span:nth-child(2) { display: none; }
     .footer-meta { grid-template-columns: 1fr; padding: 0 8px; }
-    .display-action-dock { min-width: 430px; }
     .crest { width: 29px; height: 29px; }
     .odd-button { font-size: 15px; }
   }
@@ -1671,7 +1815,6 @@ const styles = `
     .odd-button { height: clamp(28px, 4.2vh, 35px); font-size: clamp(15px, 2.4vh, 21px); }
     .empty-slip { height: calc(100vh - 126px); }
     .footer-meta { padding-inline: 12px; font-size: 12px; }
-    .display-action-dock { min-width: min(42vw, 500px); }
     .dock-action { gap: 0; padding: 3px 8px; font-size: 12px; line-height: 1; }
     .dock-action svg { font-size: 25px; }
   }
@@ -1715,6 +1858,7 @@ const EMPTY_DISPLAY = {
 export const TerminalHeaderActions = ({
   currentTime,
   onLogout,
+  onOpenResults,
   onOpenTickets,
   tableTheme,
   terminal,
@@ -1738,6 +1882,16 @@ export const TerminalHeaderActions = ({
     >
       {tableTheme === 'dark' ? <FaSun aria-hidden="true" /> : <FaMoon aria-hidden="true" />}
       <span className="header-action-label">Theme</span>
+    </button>
+    <button
+      aria-label="Open results"
+      className="header-action-button"
+      onClick={onOpenResults}
+      title="Results"
+      type="button"
+    >
+      <FaTrophy aria-hidden="true" />
+      <span className="header-action-label">Results</span>
     </button>
     <button
       aria-label="Open tickets"
@@ -1766,7 +1920,7 @@ export const TerminalHeaderActions = ({
   </div>
 );
 
-const Grid = ({onLogout, onOpenTickets, terminal}) => {
+const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
   const [leagues, setLeagues] = useState([]);
   const [selectedLeague, setSelectedLeague] = useState(null);
   const [display, setDisplay] = useState(EMPTY_DISPLAY);
@@ -1774,6 +1928,7 @@ const Grid = ({onLogout, onOpenTickets, terminal}) => {
   const [loadingDisplay, setLoadingDisplay] = useState(false);
   const [error, setError] = useState('');
   const [slip, setSlip] = useState([]);
+  const [activeMarketCode, setActiveMarketCode] = useState('MAIN');
   const [stake, setStake] = useState(DEFAULT_STAKE);
   const [ticketSubmitting, setTicketSubmitting] = useState(false);
   const [ticketStatus, setTicketStatus] = useState(null);
@@ -1782,6 +1937,7 @@ const Grid = ({onLogout, onOpenTickets, terminal}) => {
   const [payoutOpen, setPayoutOpen] = useState(false);
   const [cancelTicketOpen, setCancelTicketOpen] = useState(false);
   const [cancelTicketNumber, setCancelTicketNumber] = useState('');
+  const [moreMarketsMatch, setMoreMarketsMatch] = useState(null);
   const [tableTheme, setTableTheme] = useState(() => localStorage.getItem('virtualDisplayTableTheme') || 'dark');
   const [displayCountdown, setDisplayCountdown] = useState('03:00');
   const [countdownSeconds, setCountdownSeconds] = useState(180);
@@ -1792,6 +1948,10 @@ const Grid = ({onLogout, onOpenTickets, terminal}) => {
     providerEventId: '',
     eventCount: 0,
   });
+  const displayRequestSequenceRef = useRef(0);
+  const selectedLeagueId = selectedLeague ? getLeagueRequestId(selectedLeague) : DEFAULT_LEAGUE_ID;
+  const selectedLeagueProvider = selectedLeague ? getLeagueRequestProvider(selectedLeague) : PROVIDER;
+  const selectedLeagueNumber = selectedLeague?.leagueNumber;
 
   const toggleTableTheme = () => {
     setTableTheme((current) => {
@@ -1800,6 +1960,10 @@ const Grid = ({onLogout, onOpenTickets, terminal}) => {
       return next;
     });
   };
+
+  useEffect(() => {
+    setActiveMarketCode('MAIN');
+  }, [selectedLeague?.id, selectedLeague?.provider]);
 
   const getDisplayPayloadFromSocketPayload = useCallback((payload) => {
     if (!payload || typeof payload !== 'object') return payload;
@@ -1915,7 +2079,7 @@ const Grid = ({onLogout, onOpenTickets, terminal}) => {
     const updatedAt =
       getPayloadUpdatedAt(timingPayload) ??
       getPayloadUpdatedAt(displayPayload) ??
-      new Date().toISOString();
+      null;
 
     return {
       provider: displayPayload?.provider,
@@ -1983,7 +2147,31 @@ const Grid = ({onLogout, onOpenTickets, terminal}) => {
     const nextDisplay = normalizeDisplayPayload(payload);
     const nextEvents = nextDisplay.events;
     const incomingSummary = getDisplayFeedSummary(payload);
-    const firstOdds = getDisplayOdds(nextEvents[0] ?? {});
+    const payloadProvider = normalizeProviderToken(nextDisplay.provider);
+    const selectedProvider = normalizeProviderToken(selectedLeagueProvider);
+    const payloadLeagueIds = [nextDisplay.leagueId, nextDisplay.leagueNumber]
+      .filter((value) => value !== undefined && value !== null && value !== '')
+      .map(String);
+    const selectedLeagueIds = [
+      selectedLeagueId,
+      selectedLeagueNumber,
+    ]
+      .filter((value) => value !== undefined && value !== null && value !== '')
+      .map(String);
+    const providerMismatch = payloadProvider && selectedProvider && payloadProvider !== selectedProvider;
+    const leagueMismatch = payloadLeagueIds.length > 0 &&
+      !payloadLeagueIds.some((payloadId) => selectedLeagueIds.includes(payloadId));
+
+    if (providerMismatch || leagueMismatch) {
+      logDisplayFeedUpdate(source, 'ignored-wrong-feed', incomingSummary, {
+        selectedLeagueId,
+        selectedLeagueProvider,
+      });
+      return [];
+    }
+    const firstOdds = normalizeEventMarkets(nextEvents[0] ?? {})
+      .find(({code}) => code === '1X2')
+      ?.selections.map(({odd}) => formatOdd(odd)) ?? [];
     const timerTarget = nextDisplay.activeNextRefreshAt || nextDisplay.activeEndAt;
     const timerSeconds = getSecondsRemaining(timerTarget);
     const firstRow = nextEvents[0]
@@ -2024,6 +2212,14 @@ const Grid = ({onLogout, onOpenTickets, terminal}) => {
       const cachedEvents = Array.isArray(currentDisplay.events) ? currentDisplay.events : [];
       const hasIncomingEvents = nextEvents.length > 0;
       const hasCachedEvents = cachedEvents.length > 0;
+      const incomingHasOdds = nextEvents.some(({marketPages = []}) =>
+        marketPages.some(({selections = []}) => selections.length > 0));
+      const cachedHasOdds = cachedEvents.some(({marketPages = []}) =>
+        marketPages.some(({selections = []}) => selections.length > 0));
+      const incomingUpdatedAt = toDate(nextDisplay.lastUpdatedAt);
+      const currentUpdatedAt = toDate(currentDisplay.lastUpdatedAt);
+      const isOlderPayload = !!incomingUpdatedAt && !!currentUpdatedAt &&
+        incomingUpdatedAt.getTime() < currentUpdatedAt.getTime();
       const isExplicitlyStale = nextDisplay.isStale === true;
       const shouldClear = isExplicitlyStale && !hasIncomingEvents && !hasCachedEvents;
       const shouldPreserveCachedEvents = !hasIncomingEvents && hasCachedEvents && !shouldClear;
@@ -2035,6 +2231,21 @@ const Grid = ({onLogout, onOpenTickets, terminal}) => {
       };
 
       logDisplayFeedUpdate(source, 'before-set', currentSummary);
+
+      if (isOlderPayload) {
+        logDisplayFeedUpdate(source, 'ignored-older-payload', incomingSummary);
+        return currentDisplay;
+      }
+
+      if (hasIncomingEvents && !incomingHasOdds && cachedHasOdds) {
+        logDisplayFeedUpdate(source, 'preserve-cache-after-oddsless-payload', incomingSummary);
+        return {
+          ...currentDisplay,
+          activeNextRefreshAt: nextDisplay.activeNextRefreshAt ?? currentDisplay.activeNextRefreshAt,
+          activeEndAt: nextDisplay.activeEndAt ?? currentDisplay.activeEndAt,
+          lastUpdatedAt: nextDisplay.lastUpdatedAt ?? currentDisplay.lastUpdatedAt,
+        };
+      }
 
       if (hasIncomingEvents || shouldClear) {
         const appliedDisplay = {
@@ -2109,7 +2320,14 @@ const Grid = ({onLogout, onOpenTickets, terminal}) => {
     );
 
     return nextEvents;
-  }, [getDisplayFeedSummary, logDisplayFeedUpdate, normalizeDisplayPayload]);
+  }, [
+    getDisplayFeedSummary,
+    logDisplayFeedUpdate,
+    normalizeDisplayPayload,
+    selectedLeagueId,
+    selectedLeagueNumber,
+    selectedLeagueProvider,
+  ]);
 
   const upsertLeagueFromDisplayPayload = useCallback((payload) => {
     const displayPayload = getDisplayPayloadFromSocketPayload(payload);
@@ -2156,9 +2374,6 @@ const Grid = ({onLogout, onOpenTickets, terminal}) => {
       return displayLeague;
     });
   }, [getDisplayPayloadFromSocketPayload]);
-
-  const selectedLeagueId = selectedLeague ? getLeagueRequestId(selectedLeague) : DEFAULT_LEAGUE_ID;
-  const selectedLeagueProvider = selectedLeague ? getLeagueRequestProvider(selectedLeague) : PROVIDER;
 
   useEffect(() => {
     let cancelled = false;
@@ -2214,13 +2429,14 @@ const Grid = ({onLogout, onOpenTickets, terminal}) => {
     let cancelled = false;
 
     const loadDisplay = async () => {
+      const requestSequence = ++displayRequestSequenceRef.current;
       setLoadingDisplay(true);
       setError('');
       setSlip([]);
 
       try {
         const payload = await getDisplay(selectedLeagueProvider, selectedLeagueId);
-        if (cancelled) return;
+        if (cancelled || requestSequence !== displayRequestSequenceRef.current) return;
 
         const nextEvents = applyDisplayPayload(payload, 'rest-initial');
         console.log(`Loaded ${nextEvents.length} events for league ${selectedLeagueId}`);
@@ -2288,11 +2504,13 @@ const Grid = ({onLogout, onOpenTickets, terminal}) => {
     };
     const hydrateCurrentDisplay = async () => {
       if (!selectedLeagueId || !selectedLeagueProvider) return;
+      const requestSequence = ++displayRequestSequenceRef.current;
 
       try {
         const payload = await getDisplay(selectedLeagueProvider, selectedLeagueId);
-        applyDisplayPayload(payload, 'rest-reconnect');
-        upsertLeagueFromDisplayPayload(payload);
+        if (requestSequence !== displayRequestSequenceRef.current) return;
+        const nextEvents = applyDisplayPayload(payload, 'rest-reconnect');
+        if (nextEvents.length > 0) upsertLeagueFromDisplayPayload(payload);
         setError('');
       } catch (err) {
         console.error('Virtual-Api reconnect display hydrate error:', err);
@@ -2300,6 +2518,7 @@ const Grid = ({onLogout, onOpenTickets, terminal}) => {
     };
 
     const onAnySocketEvent = (eventName, payload) => {
+      if (![VIRTUAL_DISPLAY_UPDATED_EVENT, VIRTUAL_EVENTS_QUEUE_UPDATED_EVENT].includes(eventName)) return;
       if (!payload) return;
 
       const usableEvents = getUsableEventsFromPayload(payload);
@@ -2364,6 +2583,7 @@ const Grid = ({onLogout, onOpenTickets, terminal}) => {
 
       const nextEvents = applyDisplayPayload(payload, 'socket');
       const displayPayload = getDisplayPayloadFromSocketPayload(payload);
+      if (nextEvents.length === 0) return;
 
       if (eventName === VIRTUAL_DISPLAY_UPDATED_EVENT) {
         console.log(
@@ -2523,16 +2743,22 @@ const Grid = ({onLogout, onOpenTickets, terminal}) => {
     if (!selectedLeagueId || !selectedLeagueProvider) return undefined;
 
     let cancelled = false;
+    let requestInFlight = false;
     const hydrateDisplayFromRest = async () => {
+      if (requestInFlight) return;
+      requestInFlight = true;
+      const requestSequence = ++displayRequestSequenceRef.current;
       try {
         const payload = await getDisplay(selectedLeagueProvider, selectedLeagueId);
-        if (cancelled) return;
+        if (cancelled || requestSequence !== displayRequestSequenceRef.current) return;
 
-        applyDisplayPayload(payload, 'rest-fallback');
-        upsertLeagueFromDisplayPayload(payload);
+        const nextEvents = applyDisplayPayload(payload, 'rest-fallback');
+        if (nextEvents.length > 0) upsertLeagueFromDisplayPayload(payload);
         setError('');
       } catch (err) {
         if (!cancelled) console.error('Virtual-Api fallback display hydrate error:', err);
+      } finally {
+        requestInFlight = false;
       }
     };
 
@@ -2567,6 +2793,13 @@ const Grid = ({onLogout, onOpenTickets, terminal}) => {
     () => (Array.isArray(display.events) ? display.events : []).slice(0, 10).map(normalizeEvent),
     [display.events]
   );
+  const marketTabs = useMemo(() => buildMarketTabs(events), [events]);
+  const activeMarket = marketTabs.find(({code}) => code === activeMarketCode) ?? marketTabs[0] ?? null;
+
+  useEffect(() => {
+    if (marketTabs.length === 0 || marketTabs.some(({code}) => code === activeMarketCode)) return;
+    setActiveMarketCode(marketTabs[0].code);
+  }, [activeMarketCode, marketTabs]);
   const updateAgeMs = displayMeta.lastUpdateTime
     ? currentTime - displayMeta.lastUpdateTime.getTime()
     : null;
@@ -2589,10 +2822,10 @@ const Grid = ({onLogout, onOpenTickets, terminal}) => {
     setTicketStatus(null);
   }, [isBettingClosed]);
 
-  const addToSlip = (match, matchIndex, odd, oddIndex) => {
+  const addToSlip = (match, matchIndex, selection) => {
+    const {odd} = selection;
     if (isBettingClosed || odd === '-') return;
 
-    const oddDescriptor = getOddDescriptor(oddIndex);
     const matchId = match.matchId ?? match.betServiceMatchNo ?? match.BetServiceMatchNo ?? match.id;
     const providerMatchId =
       match.providerMatchId ??
@@ -2608,14 +2841,14 @@ const Grid = ({onLogout, onOpenTickets, terminal}) => {
       match: `${match.home} vs ${match.away}`,
       providerMatchId,
       matchId,
-      matchOddId: match.matchOddId ?? null,
+      matchOddId: selection.matchOddId ?? match.matchOddId ?? null,
       homeTeam: match.homeTeam ?? match.home ?? '',
       awayTeam: match.awayTeam ?? match.away ?? '',
-      market: oddDescriptor.market,
-      option: oddDescriptor.option,
-      line: getLineFromOption(oddDescriptor.option),
+      market: selection.marketCode,
+      option: selection.label,
+      line: selection.line ?? getLineFromOption(selection.label),
       odd,
-      oddIndex,
+      selectionKey: selection.key,
       shortCode: match.shortCode ?? '',
       number: matchIndex + 1,
     };
@@ -2632,8 +2865,8 @@ const Grid = ({onLogout, onOpenTickets, terminal}) => {
     setTicketStatus(null);
   };
 
-  const selectedPickFor = (match, oddIndex) =>
-    slip.some((pick) => pick.id === `${match.home}-${match.away}` && pick.oddIndex === oddIndex);
+  const selectedPickFor = (match, selectionKey) =>
+    slip.some((pick) => pick.id === `${match.home}-${match.away}` && pick.selectionKey === selectionKey);
 
   const buildTicketPayload = () => ({
     source: 'VirtualDisplay',
@@ -2780,6 +3013,7 @@ const Grid = ({onLogout, onOpenTickets, terminal}) => {
         <TerminalHeaderActions
           currentTime={currentTime}
           onLogout={onLogout}
+          onOpenResults={onOpenResults}
           onOpenTickets={onOpenTickets}
           tableTheme={tableTheme}
           terminal={terminal}
@@ -2833,39 +3067,33 @@ const Grid = ({onLogout, onOpenTickets, terminal}) => {
             </aside>
 
             {!isOffline && (
-            <div className="markets">
+            <div
+              className="markets"
+              style={{
+                '--market-tab-count': marketTabs.length || 1,
+                '--market-selection-count': activeMarket?.selections.length || 1,
+              }}
+            >
               <div className="market-tabs">
-                {marketGroups.map((group, index) => (
-                  <div
-                    className={`market-tab${index === 0 ? ' active' : ''}`}
-                    key={group.title}
+                {marketTabs.map((market) => (
+                  <button
+                    aria-pressed={market.code === activeMarket?.code}
+                    className={`market-tab${market.code === activeMarket?.code ? ' active' : ''}`}
+                    disabled={market.disabled}
+                    key={market.code}
+                    onClick={() => setActiveMarketCode(market.code)}
+                    title={market.title}
+                    type="button"
                   >
-                    {group.title}
-                  </div>
+                    {market.title}
+                  </button>
                 ))}
               </div>
 
               <div className="market-labels">
-                <div className="market-label-group three">
-                  {marketGroups[0].labels.map((label) => (
-                    <span className="market-label" key={label}>{label}</span>
-                  ))}
-                </div>
-                <div className="market-label-group three">
-                  {marketGroups[2].labels.map((label) => (
-                    <span className="market-label" key={label}>{label}</span>
-                  ))}
-                </div>
-                <div className="market-label-group two">
-                  {marketGroups[4].labels.map((label) => (
-                    <span className="market-label" key={label}>{label}</span>
-                  ))}
-                </div>
-                <div className="market-label-group two">
-                  {marketGroups[5].labels.map((label) => (
-                    <span className="market-label" key={label}>{label}</span>
-                  ))}
-                </div>
+                {activeMarket?.selections.map(({key, label}) => (
+                  <span className="market-label" key={key}>{getVisualMarketLabel(activeMarket.code, label)}</span>
+                ))}
               </div>
             </div>
             )}
@@ -2890,7 +3118,7 @@ const Grid = ({onLogout, onOpenTickets, terminal}) => {
               <div className="match-state">No virtual events loaded</div>
             )}
             {!isLoading && !error && !isOffline && events.map((match, index) => {
-              const displayOdds = getDisplayOdds(match);
+              const displaySelections = getDisplaySelections(match, activeMarket);
 
               return (
                 <div className="match-row" key={match.id}>
@@ -2900,17 +3128,27 @@ const Grid = ({onLogout, onOpenTickets, terminal}) => {
                   <span className="versus">vs</span>
                   <span className="team-code">{match.away}</span>
                   <Crest code={match.away} color={getCrestColor(match.away)} />
-                  <FaChevronRight className="row-arrow" />
-                  <div className="odds-grid">
-                    {displayOdds.map((odd, oddIndex) => (
+                  <button
+                    aria-label={`More markets for ${match.home} vs ${match.away}`}
+                    className="row-details-button"
+                    onClick={() => setMoreMarketsMatch(match)}
+                    type="button"
+                  >
+                    <FaChevronRight className="row-arrow" />
+                  </button>
+                  <div
+                    className="odds-grid"
+                    style={{'--market-selection-count': activeMarket?.selections.length || 1}}
+                  >
+                    {displaySelections.map((selection) => (
                       <button
-                        className={`odd-button${selectedPickFor(match, oddIndex) ? ' selected' : ''}`}
-                        disabled={isBettingClosed || odd === '-'}
-                        key={`${match.id}-${oddIndex}`}
-                        onClick={() => addToSlip(match, index, odd, oddIndex)}
+                        className={`odd-button${selectedPickFor(match, selection.key) ? ' selected' : ''}`}
+                        disabled={isBettingClosed || selection.odd === '-'}
+                        key={`${match.id}-${selection.key}`}
+                        onClick={() => addToSlip(match, index, selection)}
                         type="button"
                       >
-                        {odd}
+                        {selection.odd}
                       </button>
                     ))}
                   </div>
@@ -3040,6 +3278,38 @@ const Grid = ({onLogout, onOpenTickets, terminal}) => {
           </button>
         </div>
       </footer>
+      {moreMarketsMatch && (
+        <div className="more-markets-backdrop" role="dialog" aria-modal="true" aria-labelledby="more-markets-title">
+          <section className="more-markets-dialog">
+            <header className="more-markets-header">
+              <strong id="more-markets-title">{moreMarketsMatch.home} vs {moreMarketsMatch.away}</strong>
+              <button
+                aria-label="Close more markets"
+                className="more-markets-close"
+                onClick={() => setMoreMarketsMatch(null)}
+                type="button"
+              >
+                ×
+              </button>
+            </header>
+            {moreMarketsMatch.marketPages
+              .filter(({code}) => !['1X2', 'DC', 'BTS', 'OU', 'HOME_OU', 'AWAY_OU', '1X2_OU_1.5', '1X2_OU_2.5'].includes(code))
+              .map((market) => (
+                <div className="more-market-section" key={`${market.code}-${market.line ?? ''}`}>
+                  <h3>{market.name}</h3>
+                  <div className="more-market-selections">
+                    {market.selections.map((selection) => (
+                      <span className="more-market-selection" key={selection.key}>
+                        <span>{selection.label}</span>
+                        <strong>{formatOdd(selection.odd)}</strong>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+          </section>
+        </div>
+      )}
       <TicketCancelModal
         initialTicketNumber={cancelTicketNumber}
         open={cancelTicketOpen}

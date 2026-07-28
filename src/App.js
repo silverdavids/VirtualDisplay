@@ -1,5 +1,5 @@
 import {useCallback, useEffect, useState} from 'react';
-import {Grid, TicketsPage} from './components';
+import {Grid, ResultsDisplay, TicketsPage} from './components';
 import TerminalLogin from './components/auth/TerminalLogin';
 import TerminalStatus from './components/auth/TerminalStatus';
 import {
@@ -10,6 +10,10 @@ import {
 } from './auth/terminalAuth';
 
 const readLocation = () => ({path: window.location.pathname, search: window.location.search});
+
+export const openDisplayPageInNewTab = (path) => {
+  window.open(path, '_blank', 'noopener,noreferrer');
+};
 
 function App() {
   const [location, setLocation] = useState(readLocation);
@@ -47,21 +51,28 @@ function App() {
     return <TerminalLogin onAuthenticated={() => setAuthenticated(true)} />;
   }
 
-  const ticketsOpen = location.path.startsWith('/tickets');
+  const ticketsOpen = location.path === '/tickets';
+  const resultsOpen = location.path === '/results';
   const terminal = getTerminalSession()?.terminal;
   const logout = () => {
     logoutTerminal();
     navigate('/login', {replace: true});
   };
-  const content = ticketsOpen
-    ? <TicketsPage onBackToDisplay={() => navigate('/')} />
-    : (
+  let content;
+  if (ticketsOpen) {
+    content = <TicketsPage onBackToDisplay={() => navigate('/')} />;
+  } else if (resultsOpen) {
+    content = <ResultsDisplay onBackToBetting={() => navigate('/')} />;
+  } else {
+    content = (
       <Grid
         onLogout={logout}
-        onOpenTickets={() => navigate('/tickets')}
+        onOpenResults={() => openDisplayPageInNewTab('/results')}
+        onOpenTickets={() => openDisplayPageInNewTab('/tickets')}
         terminal={terminal}
       />
     );
+  }
 
   return (
     <div className="App">

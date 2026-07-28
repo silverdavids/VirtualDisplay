@@ -5,6 +5,7 @@ const renderHeader = (overrides = {}) => {
   const props = {
     currentTime: new Date(2026, 6, 24, 20, 2, 1).getTime(),
     onLogout: jest.fn(),
+    onOpenResults: jest.fn(),
     onOpenTickets: jest.fn(),
     tableTheme: 'dark',
     terminal: {code: 'DISPLAY-001', name: 'Test001'},
@@ -18,7 +19,7 @@ const renderHeader = (overrides = {}) => {
 test('renders the requested header order and authenticated identity without USERNOW or payout', () => {
   renderHeader();
   const controls = screen.getByLabelText('Terminal controls');
-  expect(controls).toHaveTextContent(/20:02:01.*0 USH.*Theme.*Tickets.*DISPLAY-001.*Test001.*Logout/);
+  expect(controls).toHaveTextContent(/20:02:01.*0 USH.*Theme.*Results.*Tickets.*DISPLAY-001.*Test001.*Logout/);
   expect(within(controls).queryByText('USERNOW')).not.toBeInTheDocument();
   expect(within(controls).queryByText('Payout')).not.toBeInTheDocument();
 });
@@ -28,6 +29,15 @@ test('tickets invokes only the tickets handler', () => {
   fireEvent.click(screen.getByRole('button', {name: 'Open tickets'}));
   expect(props.onOpenTickets).toHaveBeenCalledTimes(1);
   expect(props.toggleTableTheme).not.toHaveBeenCalled();
+  expect(props.onOpenResults).not.toHaveBeenCalled();
+  expect(props.onLogout).not.toHaveBeenCalled();
+});
+
+test('results invokes only the independent results handler', () => {
+  const props = renderHeader();
+  fireEvent.click(screen.getByRole('button', {name: 'Open results'}));
+  expect(props.onOpenResults).toHaveBeenCalledTimes(1);
+  expect(props.onOpenTickets).not.toHaveBeenCalled();
   expect(props.onLogout).not.toHaveBeenCalled();
 });
 
