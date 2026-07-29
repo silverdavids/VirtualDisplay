@@ -21,6 +21,8 @@ import {
 } from '../services/ticketApi';
 import {DEFAULT_LEAGUE_ID, DEFAULT_PROVIDER, getDisplay, getLeagues} from '../services/virtualApi';
 import {printVirtualReceipt} from '../utils/printVirtualReceipt';
+import {parseVirtualShortcut, resolveVirtualShortcut} from '../keyboard/virtualShortcutParser';
+import {useVirtualKeyboardShortcuts} from '../keyboard/useVirtualKeyboardShortcuts';
 import TicketCancelModal from './TicketCancelModal';
 import TicketPayoutModal from './TicketPayoutModal';
 import connectSocket, {
@@ -255,6 +257,40 @@ const normalizeEvent = (event) => ({
   odds: Array.isArray(event.odds) ? event.odds : [],
   blocked: normalizeBlocked(event.blocked),
 });
+
+const getEventIdentity = (event, index) => {
+  const home = normalizeToken(event.home);
+  const away = normalizeToken(event.away);
+  if (home && away) return `teams:${home}:${away}`;
+
+  const matchId =
+    event.matchId ??
+    event.MatchId ??
+    event.betServiceMatchNo ??
+    event.BetServiceMatchNo ??
+    event.id ??
+    event.eventId;
+
+  return matchId !== undefined && matchId !== null && matchId !== ''
+    ? `id:${String(matchId)}`
+    : `index:${index}`;
+};
+
+export const getUniqueDisplayEvents = (sourceEvents, limit = 10) => {
+  const seen = new Set();
+  const uniqueEvents = [];
+
+  (Array.isArray(sourceEvents) ? sourceEvents : []).forEach((event, index) => {
+    const normalizedEvent = normalizeEvent(event);
+    const identity = getEventIdentity(normalizedEvent, index);
+    if (seen.has(identity) || uniqueEvents.length >= limit) return;
+
+    seen.add(identity);
+    uniqueEvents.push({...normalizedEvent, displayKey: identity});
+  });
+
+  return uniqueEvents;
+};
 
 const formatOdd = (odd) => {
   if (odd === undefined || odd === null || odd === '') return '-';
@@ -1611,7 +1647,7 @@ const styles = `
     height: 100vh;
     min-height: 620px;
     display: grid;
-    grid-template-rows: 62px minmax(0, 1fr) 76px;
+    grid-template-rows: 62px minmax(0, 1fr) 42px;
     background: radial-gradient(circle at 58% 25%, #242424 0, #151515 48%, #090909 100%);
   }
 
@@ -1747,19 +1783,45 @@ const styles = `
   .receipt-action svg { display: block; margin: auto; }
 
   .virtual-display-footer { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) var(--receipt-panel-width); align-items: stretch; box-sizing: border-box; padding: 0 0 env(safe-area-inset-bottom, 0px); border-top: 1px solid #2b2b2b; color: #aaa; background: #090909; font: 13px "Segoe UI", Arial, sans-serif; }
-  .footer-meta { min-width: 0; display: grid; grid-template-columns: 1fr 1fr 1fr; align-items: center; padding: 0 18px; overflow: hidden; }
-  .footer-meta span:nth-child(2) { text-align: center; }
-  .footer-meta span:last-child { text-align: right; }
+  .footer-meta { min-width: 0; display: flex; align-items: center; justify-content: flex-end; padding: 0 18px; overflow: hidden; }
+  .footer-meta > span { display: none; }
+  .footer-meta > span:last-child { display: inline; white-space: nowrap; }
   .secure-dot { color: #25b818; }
   .display-action-dock { width: 100%; min-width: 0; display: flex; }
   .display-action-dock button { flex: 1 1 0; min-width: 0; }
   .dock-action { flex: 1 1 0; min-width: 0; display: grid; grid-template-rows: 1fr auto; place-items: center; gap: 2px; padding-inline: 4px; border: 0; border-left: 2px solid rgba(0,0,0,.35); color: #fff; font: 900 14px "Arial Narrow", Impact, sans-serif; cursor: pointer; }
-  .dock-action svg { font-size: 31px; }
+  .dock-action { gap: 0; font-size: 11px; line-height: 1; }
+  .dock-action svg { font-size: 20px; }
   .dock-action.clear { background: linear-gradient(#e30a0a,#b30000); }
   .dock-action.search { background: linear-gradient(#1699c8,#0878a5); }
   .dock-action.payout { background: linear-gradient(#12b7ba,#098b91); }
   .dock-action.print { background: linear-gradient(#656565,#414141); }
+  .dock-action.print.has-selections { background: linear-gradient(#32d414,#159800); }
   .dock-action:disabled { opacity: .42; cursor: not-allowed; }
+
+  .keyboard-shortcut-overlay {
+    position: fixed;
+    right: calc(var(--receipt-panel-width) + 16px);
+    bottom: 86px;
+    z-index: 25;
+    min-width: 150px;
+    max-width: min(420px, calc(100vw - 32px));
+    padding: 8px 12px;
+    border: 1px solid #e31a1a;
+    border-radius: 4px;
+    background: rgba(8, 8, 8, .94);
+    color: #fff;
+    font: 800 15px "Segoe UI", Arial, sans-serif;
+    box-shadow: 0 5px 18px rgba(0,0,0,.45);
+  }
+  .keyboard-shortcut-overlay strong { color: #ff3030; }
+  .keyboard-shortcut-feedback { display: block; margin-top: 3px; color: #ffca32; font-size: 12px; }
+  .keyboard-shortcut-feedback.success { color: #65d26e; }
+  .odd-button.keyboard-highlight {
+    border-color: #fff;
+    background: linear-gradient(#ff2a2a,#b30000);
+    box-shadow: 0 0 0 2px #ffdf55, 0 0 16px #ff3030;
+  }
 
   .table-theme-light .match-list { background: #a9a9a9; }
   .table-theme-light .match-row,
@@ -1780,9 +1842,7 @@ const styles = `
     .terminal-body { grid-template-columns: minmax(0, 1fr) var(--receipt-panel-width); }
     .match-row, .match-row:nth-child(odd) { grid-template-columns: 24px 34px minmax(36px, 1fr) 18px 34px minmax(36px, 1fr) 20px minmax(0, 1fr); }
     .team-code { font-size: 14px; }
-    .footer-meta span:first-child,
-    .footer-meta span:nth-child(2) { display: none; }
-    .footer-meta { grid-template-columns: 1fr; padding: 0 8px; }
+    .footer-meta { padding: 0 8px; }
     .crest { width: 29px; height: 29px; }
     .odd-button { font-size: 15px; }
   }
@@ -1790,7 +1850,7 @@ const styles = `
   @media (max-height: 820px) {
     .betting-board {
       min-height: 0;
-      grid-template-rows: 58px minmax(0, 1fr) 68px;
+      grid-template-rows: 58px minmax(0, 1fr) 40px;
     }
     .terminal-topbar { height: 58px; }
     .header-brand img { max-height: 50px; }
@@ -1816,7 +1876,7 @@ const styles = `
     .empty-slip { height: calc(100vh - 126px); }
     .footer-meta { padding-inline: 12px; font-size: 12px; }
     .dock-action { gap: 0; padding: 3px 8px; font-size: 12px; line-height: 1; }
-    .dock-action svg { font-size: 25px; }
+    .dock-action svg { font-size: 19px; }
   }
 
   @media (max-width: 900px) {
@@ -2790,7 +2850,7 @@ const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
   const [leagueTitleTop, leagueTitleBottom] = splitLeagueTitle(display.leagueName || getLeagueName(selectedLeague));
   const isLoading = loadingLeagues || loadingDisplay;
   const events = useMemo(
-    () => (Array.isArray(display.events) ? display.events : []).slice(0, 10).map(normalizeEvent),
+    () => getUniqueDisplayEvents(display.events, 10),
     [display.events]
   );
   const marketTabs = useMemo(() => buildMarketTabs(events), [events]);
@@ -2812,6 +2872,7 @@ const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
   const eventCount = events.length;
   const isBettingClosed = countdownSeconds <= 0 || display.isStale === true || eventCount === 0;
   const isBettingClosedRef = useRef(isBettingClosed);
+  const stakeInputRef = useRef(null);
   isBettingClosedRef.current = isBettingClosed;
   const liveStatusLabel = isStale ? 'STALE' : isSyncing ? 'SYNCING' : 'LIVE';
 
@@ -2980,6 +3041,69 @@ const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
     }
   };
 
+  const clearBetSlip = () => {
+    if (ticketSubmitting) return {ok: false, message: 'Ticket submission is in progress'};
+    if (slip.length === 0) return {ok: false, message: 'Bet slip is already empty'};
+    setSlip([]);
+    setStake(DEFAULT_STAKE);
+    setTicketStatus(null);
+    return {ok: true, message: 'Bet slip cleared'};
+  };
+
+  const executeKeyboardShortcut = (value) => {
+    const parsed = parseVirtualShortcut(value);
+    const resolved = resolveVirtualShortcut(parsed, events, {bettingClosed: isBettingClosed});
+    if (!resolved.ok) return resolved;
+
+    addToSlip(resolved.event, parsed.matchIndex, resolved.selection);
+    return {
+      ok: true,
+      message: `${resolved.event.home} vs ${resolved.event.away}: ${resolved.selection.label} added`,
+      highlightKey: `${resolved.event.displayKey}-${resolved.selection.key}`,
+    };
+  };
+
+  const switchMarketTab = (direction) => {
+    const availableTabs = marketTabs.filter(({disabled}) => !disabled);
+    if (availableTabs.length < 2) return;
+    const currentIndex = availableTabs.findIndex(({code}) => code === activeMarket?.code);
+    const nextIndex = (Math.max(0, currentIndex) + direction + availableTabs.length) % availableTabs.length;
+    setActiveMarketCode(availableTabs[nextIndex].code);
+  };
+
+  const keyboard = useVirtualKeyboardShortcuts({
+    disabled: payoutOpen || cancelTicketOpen || Boolean(moreMarketsMatch) || Boolean(placedTicket),
+    onClearSlip: clearBetSlip,
+    onExecute: executeKeyboardShortcut,
+    onFocusStake: () => {
+      if (!stakeInputRef.current) return {ok: false, message: 'Add a selection before entering a stake'};
+      if (isBettingClosed) return {ok: false, message: BETTING_CLOSED_MESSAGE};
+      stakeInputRef.current.focus();
+      stakeInputRef.current.select();
+      return {ok: true, message: 'Stake input focused'};
+    },
+    onOpenPayout: () => {
+      if (ticketSubmitting) return {ok: false, message: 'Ticket submission is in progress'};
+      setPayoutOpen(true);
+      return {ok: true, message: 'Payout opened'};
+    },
+    onOpenResults,
+    onOpenSearch: () => {
+      if (ticketSubmitting) return {ok: false, message: 'Ticket submission is in progress'};
+      setPayoutOpen(true);
+      return {ok: true, message: 'Ticket search opened'};
+    },
+    onPrint: () => {
+      if (isBettingClosed) return {ok: false, message: BETTING_CLOSED_MESSAGE};
+      if (ticketSubmitting) return {ok: false, message: 'Ticket submission is in progress'};
+      if (slip.length === 0) return {ok: false, message: 'Add a selection before printing'};
+      if (Number(stake) <= 0) return {ok: false, message: 'Enter a valid stake before printing'};
+      submitTicket();
+      return {ok: true, message: 'Ticket submission started'};
+    },
+    onSwitchMarket: switchMarketTab,
+  });
+
   return (
     <main className={`betting-board table-theme-${tableTheme}`}>
       <style>{styles}</style>
@@ -3121,7 +3245,7 @@ const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
               const displaySelections = getDisplaySelections(match, activeMarket);
 
               return (
-                <div className="match-row" key={match.id}>
+                <div className="match-row" key={match.displayKey}>
                   <span className="match-number">{index + 1}</span>
                   <Crest code={match.home} color={getCrestColor(match.home)} />
                   <span className="team-code">{match.home}</span>
@@ -3142,9 +3266,9 @@ const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
                   >
                     {displaySelections.map((selection) => (
                       <button
-                        className={`odd-button${selectedPickFor(match, selection.key) ? ' selected' : ''}`}
+                        className={`odd-button${selectedPickFor(match, selection.key) ? ' selected' : ''}${keyboard.highlightKey === `${match.displayKey}-${selection.key}` ? ' keyboard-highlight' : ''}`}
                         disabled={isBettingClosed || selection.odd === '-'}
-                        key={`${match.id}-${selection.key}`}
+                        key={`${match.displayKey}-${selection.key}`}
                         onClick={() => addToSlip(match, index, selection)}
                         type="button"
                       >
@@ -3218,6 +3342,7 @@ const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
                   id="stake"
                   min="0"
                   onChange={(event) => setStake(Number(event.target.value))}
+                  ref={stakeInputRef}
                   type="number"
                   value={stake}
                 />
@@ -3249,11 +3374,7 @@ const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
             aria-label="Clear bet slip"
             className="dock-action clear"
             disabled={ticketSubmitting || slip.length === 0}
-            onClick={() => {
-              setSlip([]);
-              setStake(DEFAULT_STAKE);
-              setTicketStatus(null);
-            }}
+            onClick={clearBetSlip}
             title="Clear bet slip"
             type="button"
           >
@@ -3267,7 +3388,7 @@ const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
           </button>
           <button
             aria-label={ticketSubmitting ? 'Placing bet' : 'Print ticket'}
-            className="dock-action print"
+            className={`dock-action print${slip.length > 0 ? ' has-selections' : ''}`}
             disabled={isBettingClosed || ticketSubmitting || slip.length === 0 || Number(stake) <= 0}
             onClick={submitTicket}
             title={ticketSubmitting ? 'Placing bet' : 'Print ticket'}
@@ -3278,6 +3399,16 @@ const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
           </button>
         </div>
       </footer>
+      {(keyboard.shortcut || keyboard.feedback) && (
+        <div className="keyboard-shortcut-overlay" role="status" aria-live="polite">
+          Shortcut: <strong>{keyboard.shortcut || '—'}</strong>
+          {keyboard.feedback && (
+            <span className={`keyboard-shortcut-feedback ${keyboard.feedback.type}`}>
+              {keyboard.feedback.message}
+            </span>
+          )}
+        </div>
+      )}
       {moreMarketsMatch && (
         <div className="more-markets-backdrop" role="dialog" aria-modal="true" aria-labelledby="more-markets-title">
           <section className="more-markets-dialog">
