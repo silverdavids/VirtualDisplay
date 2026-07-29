@@ -25,6 +25,7 @@ import {parseVirtualShortcut, resolveVirtualShortcut} from '../keyboard/virtualS
 import {useVirtualKeyboardShortcuts} from '../keyboard/useVirtualKeyboardShortcuts';
 import TicketCancelModal from './TicketCancelModal';
 import TicketPayoutModal from './TicketPayoutModal';
+import {reconcileCountdownDeadline} from './countdownDeadline';
 import connectSocket, {
   VIRTUAL_DISPLAY_UPDATED_EVENT,
   VIRTUAL_EVENTS_QUEUE_UPDATED_EVENT,
@@ -537,10 +538,14 @@ const getPayloadCountdownTarget = (payload) => {
     payload.nextStartTime ??
     payload.endAt ??
     payload.endsAt ??
-    payload.endTime ??
-    getPayloadStartTime(payload);
+    payload.endTime;
 
   if (toDate(target)) return target;
+
+  const remainingSeconds = Number(payload.remainingSeconds);
+  if (Number.isFinite(remainingSeconds) && remainingSeconds >= 0) {
+    return new Date(Date.now() + remainingSeconds * 1000).toISOString();
+  }
 
   return (
     getPayloadCountdownTarget(payload.currentBoard) ??
@@ -1999,8 +2004,8 @@ const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
   const [cancelTicketNumber, setCancelTicketNumber] = useState('');
   const [moreMarketsMatch, setMoreMarketsMatch] = useState(null);
   const [tableTheme, setTableTheme] = useState(() => localStorage.getItem('virtualDisplayTableTheme') || 'dark');
-  const [displayCountdown, setDisplayCountdown] = useState('03:00');
-  const [countdownSeconds, setCountdownSeconds] = useState(180);
+  const [displayCountdown, setDisplayCountdown] = useState('--:--');
+  const [countdownSeconds, setCountdownSeconds] = useState(null);
   const [currentTime, setCurrentTime] = useState(() => Date.now());
   const [socketDebug, setSocketDebug] = useState({
     connected: false,
@@ -2009,6 +2014,8 @@ const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
     eventCount: 0,
   });
   const displayRequestSequenceRef = useRef(0);
+  const initialRestLoggedRef = useRef(false);
+  const firstSocketLoggedRef = useRef(false);
   const selectedLeagueId = selectedLeague ? getLeagueRequestId(selectedLeague) : DEFAULT_LEAGUE_ID;
   const selectedLeagueProvider = selectedLeague ? getLeagueRequestProvider(selectedLeague) : PROVIDER;
   const selectedLeagueNumber = selectedLeague?.leagueNumber;
@@ -2234,6 +2241,28 @@ const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
       ?.selections.map(({odd}) => formatOdd(odd)) ?? [];
     const timerTarget = nextDisplay.activeNextRefreshAt || nextDisplay.activeEndAt;
     const timerSeconds = getSecondsRemaining(timerTarget);
+    const payloadRemainingSeconds = Number(
+      payload?.remainingSeconds ??
+      payload?.currentBoard?.remainingSeconds ??
+      payload?.display?.remainingSeconds ??
+      payload?.data?.remainingSeconds
+    );
+    const timingLog = {
+      providerEventId: nextDisplay.activeProviderEventId ?? nextDisplay.providerEventId ?? '',
+      remainingSeconds: Number.isFinite(payloadRemainingSeconds)
+        ? payloadRemainingSeconds
+        : timerSeconds,
+      deadline: timerTarget ?? null,
+      now: Date.now(),
+    };
+    if (source === 'rest-initial' && !initialRestLoggedRef.current) {
+      initialRestLoggedRef.current = true;
+      console.log('INITIAL REST:', timingLog);
+    }
+    if (source === 'socket' && !firstSocketLoggedRef.current) {
+      firstSocketLoggedRef.current = true;
+      console.log('FIRST SOCKET:', timingLog);
+    }
     const firstRow = nextEvents[0]
       ? `${nextEvents[0].homeTeam ?? nextEvents[0].home ?? ''} vs ${nextEvents[0].awayTeam ?? nextEvents[0].away ?? ''}`
       : '';
@@ -2297,22 +2326,38 @@ const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
         return currentDisplay;
       }
 
+      const deadlineDecision = reconcileCountdownDeadline({
+        currentProviderEventId: currentDisplay.activeProviderEventId ?? currentDisplay.providerEventId,
+        currentDeadline: currentDisplay.activeNextRefreshAt ?? currentDisplay.activeEndAt,
+        incomingProviderEventId: nextDisplay.activeProviderEventId ?? nextDisplay.providerEventId,
+        incomingDeadline: nextDisplay.activeNextRefreshAt ?? nextDisplay.activeEndAt,
+      });
+      console.log('COUNTDOWN RESET:', {
+        oldDeadline: currentDisplay.activeNextRefreshAt ?? currentDisplay.activeEndAt ?? null,
+        newDeadline: deadlineDecision.deadline,
+        reason: deadlineDecision.reason,
+        reset: deadlineDecision.reset,
+      });
+      const reconciledNextDisplay = {
+        ...nextDisplay,
+        activeNextRefreshAt: deadlineDecision.deadline,
+      };
+
       if (hasIncomingEvents && !incomingHasOdds && cachedHasOdds) {
         logDisplayFeedUpdate(source, 'preserve-cache-after-oddsless-payload', incomingSummary);
         return {
           ...currentDisplay,
-          activeNextRefreshAt: nextDisplay.activeNextRefreshAt ?? currentDisplay.activeNextRefreshAt,
-          activeEndAt: nextDisplay.activeEndAt ?? currentDisplay.activeEndAt,
-          lastUpdatedAt: nextDisplay.lastUpdatedAt ?? currentDisplay.lastUpdatedAt,
+          activeNextRefreshAt: deadlineDecision.deadline,
+          activeEndAt: reconciledNextDisplay.activeEndAt ?? currentDisplay.activeEndAt,
+          lastUpdatedAt: reconciledNextDisplay.lastUpdatedAt ?? currentDisplay.lastUpdatedAt,
         };
       }
 
       if (hasIncomingEvents || shouldClear) {
         const appliedDisplay = {
-          ...nextDisplay,
-          activeNextRefreshAt: nextDisplay.activeNextRefreshAt ?? currentDisplay.activeNextRefreshAt,
-          activeStartAt: nextDisplay.activeStartAt ?? currentDisplay.activeStartAt,
-          isStale: hasIncomingEvents ? false : nextDisplay.isStale,
+          ...reconciledNextDisplay,
+          activeStartAt: reconciledNextDisplay.activeStartAt ?? currentDisplay.activeStartAt,
+          isStale: hasIncomingEvents ? false : reconciledNextDisplay.isStale,
         };
 
         logDisplayFeedUpdate(source, 'applied', {
@@ -2339,8 +2384,8 @@ const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
           leagueName: nextDisplay.leagueName ?? currentDisplay.leagueName,
           activeProviderEventId: nextDisplay.activeProviderEventId ?? currentDisplay.activeProviderEventId,
           activeWeekNumber: nextDisplay.activeWeekNumber ?? currentDisplay.activeWeekNumber,
-          activeNextRefreshAt: nextDisplay.activeNextRefreshAt ?? currentDisplay.activeNextRefreshAt,
-          activeEndAt: nextDisplay.activeEndAt ?? currentDisplay.activeEndAt,
+          activeNextRefreshAt: deadlineDecision.deadline,
+          activeEndAt: reconciledNextDisplay.activeEndAt ?? currentDisplay.activeEndAt,
           activeStartAt: nextDisplay.activeStartAt ?? currentDisplay.activeStartAt,
           lastUpdatedAt: nextDisplay.lastUpdatedAt ?? currentDisplay.lastUpdatedAt,
           isStale: false,
@@ -2617,17 +2662,42 @@ const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
         const timingPayload = getBoardTimingPayload(payload, displayPayload);
         const timerTarget = getPayloadCountdownTarget(timingPayload) ?? getPayloadCountdownTarget(displayPayload);
         const startTime = getPayloadStartTime(timingPayload) ?? getPayloadStartTime(displayPayload);
+        const incomingProviderEventId = timingPayload?.providerEventId ?? displayPayload?.providerEventId;
 
-        if (timerTarget) {
-          setDisplay((currentDisplay) => ({
-            ...currentDisplay,
-            activeProviderEventId: timingPayload?.providerEventId ?? currentDisplay.activeProviderEventId,
-            activeWeekNumber: timingPayload?.weekNumber ?? currentDisplay.activeWeekNumber,
-            activeNextRefreshAt: timerTarget,
-            activeEndAt: timingPayload?.endAt ?? timingPayload?.endsAt ?? currentDisplay.activeEndAt,
-            activeStartAt: startTime ?? currentDisplay.activeStartAt,
-            lastUpdatedAt: getPayloadUpdatedAt(timingPayload) ?? currentDisplay.lastUpdatedAt,
-          }));
+        if (timerTarget || incomingProviderEventId) {
+          setDisplay((currentDisplay) => {
+            const incomingUpdatedAt = toDate(getPayloadUpdatedAt(timingPayload));
+            const currentUpdatedAt = toDate(currentDisplay.lastUpdatedAt);
+            if (incomingUpdatedAt && currentUpdatedAt &&
+              incomingUpdatedAt.getTime() < currentUpdatedAt.getTime()) {
+              return currentDisplay;
+            }
+
+            const deadlineDecision = reconcileCountdownDeadline({
+              currentProviderEventId: currentDisplay.activeProviderEventId ?? currentDisplay.providerEventId,
+              currentDeadline: currentDisplay.activeNextRefreshAt ?? currentDisplay.activeEndAt,
+              incomingProviderEventId,
+              incomingDeadline: timerTarget,
+            });
+            console.log('COUNTDOWN RESET:', {
+              oldDeadline: currentDisplay.activeNextRefreshAt ?? currentDisplay.activeEndAt ?? null,
+              newDeadline: deadlineDecision.deadline,
+              reason: deadlineDecision.reason,
+              reset: deadlineDecision.reset,
+            });
+
+            return {
+              ...currentDisplay,
+              activeProviderEventId: incomingProviderEventId ?? currentDisplay.activeProviderEventId,
+              activeWeekNumber: timingPayload?.weekNumber ?? currentDisplay.activeWeekNumber,
+              activeNextRefreshAt: deadlineDecision.deadline,
+              activeEndAt: timerTarget
+                ? timingPayload?.endAt ?? timingPayload?.endsAt ?? displayPayload?.endAt ?? null
+                : currentDisplay.activeEndAt,
+              activeStartAt: startTime ?? currentDisplay.activeStartAt,
+              lastUpdatedAt: getPayloadUpdatedAt(timingPayload) ?? currentDisplay.lastUpdatedAt,
+            };
+          });
           logDisplayFeedUpdate('socket', 'applied-timing-only', payloadSummary);
         }
 
@@ -2668,19 +2738,16 @@ const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
     };
 
     socket.on('connect', markSocketConnected);
-    socket.on('connect', hydrateCurrentDisplay);
     socket.on('disconnect', markSocketDisconnected);
     socket.on('connect_error', markSocketDisconnected);
     socket.io.on('reconnect', hydrateCurrentDisplay);
     socket.onAny(onAnySocketEvent);
     if (socket.connected) {
       markSocketConnected();
-      hydrateCurrentDisplay();
     }
 
     return () => {
       socket.off('connect', markSocketConnected);
-      socket.off('connect', hydrateCurrentDisplay);
       socket.off('disconnect', markSocketDisconnected);
       socket.off('connect_error', markSocketDisconnected);
       socket.io.off('reconnect', hydrateCurrentDisplay);
@@ -2700,7 +2767,7 @@ const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
   ]);
 
   useEffect(() => {
-    const target = display.activeNextRefreshAt || display.activeEndAt || display.activeStartAt;
+    const target = display.activeNextRefreshAt || display.activeEndAt;
     const targetDate = toDate(target);
     const providerEventId = display.activeProviderEventId ?? display.providerEventId ?? '';
 
@@ -2710,11 +2777,11 @@ const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
     );
 
     if (!targetDate) {
-      setDisplayCountdown('03:00');
-      setCountdownSeconds(180);
+      setDisplayCountdown('--:--');
+      setCountdownSeconds(null);
       console.log('[virtual-display-timer]', {
         providerEventId,
-        startTime: display.activeStartAt ?? '',
+        countdownTarget: '',
         now: new Date().toISOString(),
         secondsRemaining: null,
       });
@@ -2726,7 +2793,7 @@ const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
       const mmss = formatCountdown(seconds);
       console.log('[virtual-display-timer]', {
         providerEventId,
-        startTime: display.activeStartAt ?? target,
+        countdownTarget: target,
         now: new Date().toISOString(),
         secondsRemaining: seconds,
       });
@@ -2744,7 +2811,6 @@ const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
     display.activeEndAt,
     display.activeNextRefreshAt,
     display.activeProviderEventId,
-    display.activeStartAt,
     display.providerEventId,
   ]);
 
@@ -2845,8 +2911,8 @@ const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
     lastUpdateTime: toDate(display.lastUpdatedAt),
     eventCount: display.events.length,
   };
-  const timerTargetDate = toDate(display.activeNextRefreshAt || display.activeEndAt || display.activeStartAt);
-  const countdownTargetLabel = timerTargetDate ? formatClockTime(timerTargetDate) : '20:05';
+  const timerTargetDate = toDate(display.activeNextRefreshAt || display.activeEndAt);
+  const countdownTargetLabel = timerTargetDate ? formatClockTime(timerTargetDate) : '--:--';
   const [leagueTitleTop, leagueTitleBottom] = splitLeagueTitle(display.leagueName || getLeagueName(selectedLeague));
   const isLoading = loadingLeagues || loadingDisplay;
   const events = useMemo(
@@ -2870,7 +2936,9 @@ const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
   const isSyncing = !isStale && !hasLiveUpdate && hasCountdownRolledOver;
   const isOffline = isStale || !hasDisplayEvents;
   const eventCount = events.length;
-  const isBettingClosed = countdownSeconds <= 0 || display.isStale === true || eventCount === 0;
+  const isBettingClosed = (
+    countdownSeconds !== null && countdownSeconds <= 0
+  ) || display.isStale === true || eventCount === 0;
   const isBettingClosedRef = useRef(isBettingClosed);
   const stakeInputRef = useRef(null);
   isBettingClosedRef.current = isBettingClosed;
