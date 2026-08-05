@@ -1,9 +1,9 @@
-import {VIRTUAL_TICKETS_API_BASE} from '../services/apiConfig';
+import {buildApiUrl, VIRTUAL_TICKETS_API} from '../config/runtimeConfig';
 
 export const TERMINAL_SESSION_KEY = 'virtualDisplayTerminalSession';
 export const TERMINAL_AUTH_CHANGED_EVENT = 'virtual-display-terminal-auth-changed';
 
-const DISPLAY_AUTH_URL = `${VIRTUAL_TICKETS_API_BASE}/api/auth/display`;
+const DISPLAY_AUTH_URL = buildApiUrl(VIRTUAL_TICKETS_API, '/api/auth/display');
 const version = process.env.REACT_APP_DISPLAY_VERSION || '1.0.0';
 
 const readValue = (source, keys) => {

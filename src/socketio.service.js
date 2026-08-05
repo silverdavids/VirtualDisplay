@@ -1,8 +1,8 @@
 import {io} from 'socket.io-client';
 import {virtualGamesStorage} from './rxjs-stores';
-import {VIRTUAL_API_BASE} from './services/apiConfig';
+import {VIRTUAL_API_BASE_URL} from './config/runtimeConfig';
 
-const SOCKET_URL = VIRTUAL_API_BASE;
+const SOCKET_URL = VIRTUAL_API_BASE_URL;
 const SOCKET_PATH = '/socket.io';
 
 export const VIRTUAL_DISPLAY_UPDATED_EVENT = 'virtual-display-updated';

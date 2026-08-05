@@ -1,5 +1,5 @@
 import {getDisplayAuthHeaders, handleTerminalUnauthorized} from './displayAuthApi';
-import {VIRTUAL_TICKETS_API_BASE} from './apiConfig';
+import {buildApiUrl, VIRTUAL_TICKETS_API} from '../config/runtimeConfig';
 
 export const BETTING_CLOSED_MESSAGE = 'Betting closed. Waiting for the next virtual event.';
 
@@ -8,12 +8,8 @@ const postTicket = async (path, payload, {isBettingClosed = false} = {}) => {
     throw new Error(BETTING_CLOSED_MESSAGE);
   }
 
-  if (!VIRTUAL_TICKETS_API_BASE) {
-    throw new Error('VirtualTickets.Api base URL is not configured.');
-  }
-
   const authHeaders = await getDisplayAuthHeaders();
-  const res = await fetch(`${VIRTUAL_TICKETS_API_BASE}${path}`, {
+  const res = await fetch(buildApiUrl(VIRTUAL_TICKETS_API, path), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

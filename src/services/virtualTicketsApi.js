@@ -1,7 +1,7 @@
 import {getDisplayAuthHeaders, handleTerminalUnauthorized} from './displayAuthApi';
-import {VIRTUAL_TICKETS_API_BASE} from './apiConfig';
+import {buildApiUrl, VIRTUAL_TICKETS_API} from '../config/runtimeConfig';
 
-export const VIRTUAL_TICKETS_API_BASE_URL = `${VIRTUAL_TICKETS_API_BASE}/api/virtual-tickets`;
+export const VIRTUAL_TICKETS_API_BASE_URL = buildApiUrl(VIRTUAL_TICKETS_API, '/api/virtual-tickets');
 
 const AUTH_ERROR_MESSAGE = 'Ticket API authentication failed. Check display API key configuration.';
 

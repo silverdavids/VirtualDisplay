@@ -1,5 +1,5 @@
 import {getDisplayAuthHeaders, handleTerminalUnauthorized} from '../services/displayAuthApi';
-import {VIRTUAL_TICKETS_API_BASE} from '../services/apiConfig';
+import {buildApiUrl, VIRTUAL_TICKETS_API} from '../config/runtimeConfig';
 
 export class TicketCancelApiError extends Error {
   constructor({status = 0, code = 'NetworkError', message, body = null, cause}) {
@@ -28,7 +28,7 @@ const parseBody = async (response) => {
 const post = async (path, payload) => {
   let response;
   try {
-    response = await fetch(`${VIRTUAL_TICKETS_API_BASE}${path}`, {
+    response = await fetch(buildApiUrl(VIRTUAL_TICKETS_API, path), {
       method: 'POST',
       cache: 'no-store',
       headers: {

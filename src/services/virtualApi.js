@@ -1,12 +1,11 @@
-import {VIRTUAL_API_BASE} from './apiConfig';
+import {buildApiUrl, VIRTUAL_API_BASE_URL} from '../config/runtimeConfig';
 import {getDisplayAuthHeaders, handleTerminalUnauthorized} from './displayAuthApi';
 
-export const VIRTUAL_API_BASE_URL = VIRTUAL_API_BASE;
 export const DEFAULT_PROVIDER = 'VirtualHorizon';
 export const DEFAULT_LEAGUE_ID = '21';
 
 const request = async (path, options = {}) => {
-  const response = await fetch(`${VIRTUAL_API_BASE_URL}${path}`, {
+  const response = await fetch(buildApiUrl(VIRTUAL_API_BASE_URL, path), {
     cache: 'no-store',
     ...options,
     headers: {
@@ -57,6 +56,6 @@ export const getDisplay = (provider, leagueId) => {
     leagueId: String(resolvedLeagueId),
     _: String(Date.now()),
   });
-  console.log(`REST virtual display ${VIRTUAL_API_BASE_URL}/api/virtual/display?${searchParams.toString()}`);
+  console.log(`REST virtual display ${buildApiUrl(VIRTUAL_API_BASE_URL, `/api/virtual/display?${searchParams.toString()}`)}`);
   return request(`/api/virtual/display?${searchParams.toString()}`);
 };

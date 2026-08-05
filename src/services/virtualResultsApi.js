@@ -1,10 +1,10 @@
 import {getDisplayAuthHeaders, handleTerminalUnauthorized} from './displayAuthApi';
-import {VIRTUAL_API_BASE} from './apiConfig';
+import {buildApiUrl, VIRTUAL_API_BASE_URL} from '../config/runtimeConfig';
 
 export const LATEST_RESULTS_PATH = '/api/virtual/results/latest';
 
 export const getLatestResults = async () => {
-  const response = await fetch(`${VIRTUAL_API_BASE}${LATEST_RESULTS_PATH}`, {
+  const response = await fetch(buildApiUrl(VIRTUAL_API_BASE_URL, LATEST_RESULTS_PATH), {
     cache: 'no-store',
     headers: await getDisplayAuthHeaders(),
   });
