@@ -1,6 +1,7 @@
 import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import {FaArrowLeft, FaEye, FaReceipt, FaTimes} from 'react-icons/fa';
 import {getVirtualTicketDetails, getVirtualTickets} from '../services/virtualTicketsApi';
+import {normalizeVirtualReceipt, printVirtualReceipt} from '../utils/printVirtualReceipt';
 
 const AUTO_REFRESH_MS = 15000;
 const FILTER_TODAY = 'today';
@@ -311,6 +312,9 @@ const styles = `
     background: #242c34;
     color: #fff;
   }
+
+  .ticket-detail-header-actions { display: flex; align-items: center; gap: 8px; }
+  .ticket-detail-action { height: 38px; padding: 0 14px; border-radius: 6px; background: #d90000; color: #fff; }
 
   .ticket-detail-body {
     padding: 18px;
@@ -714,6 +718,12 @@ const TicketsPage = ({onBackToDisplay}) => {
     setDetailError('');
   };
 
+  const reprintTicket = () => {
+    if (!detailPayload) return;
+    const receipt = normalizeVirtualReceipt({details: detailPayload});
+    if (!printVirtualReceipt(receipt)) setDetailError('This ticket has no printable lookup identifier.');
+  };
+
   const emptyMessage = searchTerm.trim()
     ? 'No matching virtual tickets found.'
     : getEmptyMessage(selectedFilter);
@@ -823,9 +833,14 @@ const TicketsPage = ({onBackToDisplay}) => {
               <div>
                 <h2 id="ticket-detail-title">Ticket {selectedReceiptId}</h2>
               </div>
-              <button className="ticket-detail-close" onClick={closeDetails} title="Close details" type="button">
-                <FaTimes />
-              </button>
+              <div className="ticket-detail-header-actions">
+                {detailPayload && !detailLoading && !detailError && (
+                  <button className="ticket-detail-action" onClick={reprintTicket} type="button">REPRINT</button>
+                )}
+                <button className="ticket-detail-close" onClick={closeDetails} title="Close details" type="button">
+                  <FaTimes />
+                </button>
+              </div>
             </header>
 
             <div className="ticket-detail-body">

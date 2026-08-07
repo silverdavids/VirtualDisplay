@@ -20,7 +20,8 @@ import {
   validateVirtualTicket,
 } from '../services/ticketApi';
 import {DEFAULT_LEAGUE_ID, DEFAULT_PROVIDER, getDisplay, getLeagues} from '../services/virtualApi';
-import {printVirtualReceipt} from '../utils/printVirtualReceipt';
+import {getVirtualTicketDetails} from '../services/virtualTicketsApi';
+import {normalizeVirtualReceipt, printVirtualReceipt} from '../utils/printVirtualReceipt';
 import {parseVirtualShortcut, resolveVirtualShortcut} from '../keyboard/virtualShortcutParser';
 import {useVirtualKeyboardShortcuts} from '../keyboard/useVirtualKeyboardShortcuts';
 import TicketCancelModal from './TicketCancelModal';
@@ -1611,6 +1612,33 @@ const styles = `
     background: #555;
   }
 
+  .ticket-print-failure {
+    position: fixed;
+    right: 18px;
+    bottom: 82px;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    max-width: 430px;
+    padding: 12px 14px;
+    border: 1px solid #ffcb00;
+    background: #202020;
+    color: #fff;
+    box-shadow: 0 4px 18px rgba(0,0,0,.45);
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  .ticket-print-failure button {
+    border: 0;
+    padding: 8px 12px;
+    background: #d90000;
+    color: #fff;
+    cursor: pointer;
+    font-weight: 900;
+  }
+
   .receipt-action {
     flex: 1 1 0;
     min-width: 0;
@@ -2016,6 +2044,7 @@ const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
   const displayRequestSequenceRef = useRef(0);
   const initialRestLoggedRef = useRef(false);
   const firstSocketLoggedRef = useRef(false);
+  const autoPrintedTicketKeysRef = useRef(new Set());
   const selectedLeagueId = selectedLeague ? getLeagueRequestId(selectedLeague) : DEFAULT_LEAGUE_ID;
   const selectedLeagueProvider = selectedLeague ? getLeagueRequestProvider(selectedLeague) : PROVIDER;
   const selectedLeagueNumber = selectedLeague?.leagueNumber;
@@ -3026,24 +3055,28 @@ const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
     setStake(DEFAULT_STAKE);
   };
 
-  const closePlacedTicketPopup = () => {
-    resetPlacedTicketSlip();
-    setPlacedTicket(null);
-    setPrintError('');
-  };
+  const printPlacedTicketReceipt = async (ticket = placedTicket, {manual = false} = {}) => {
+    if (!ticket) return false;
+    const key = String(ticket.placed?.receiptId ?? ticket.placed?.serial ?? '');
+    if (!manual && (!key || autoPrintedTicketKeysRef.current.has(key))) return false;
 
-  const printPlacedTicketReceipt = () => {
-    if (!placedTicket) return;
-
-    const printed = printVirtualReceipt(placedTicket);
-
-    if (!printed) {
-      setPrintError('Allow popups to print receipt.');
-      return;
+    try {
+      const details = await getVirtualTicketDetails(ticket.placed.receiptId);
+      const receipt = normalizeVirtualReceipt({...ticket, details, terminal});
+      const printed = printVirtualReceipt(receipt);
+      if (!printed) throw new Error('Receipt printer could not be opened.');
+      if (!manual) autoPrintedTicketKeysRef.current.add(key);
+      setPlacedTicket(null);
+      setPrintError('');
+      setTicketStatus({type: 'success', message: `Ticket ${receipt.ticketNumber} placed / printing...`});
+      return true;
+    } catch (error) {
+      console.error('Virtual ticket print error:', error);
+      setPlacedTicket(ticket);
+      setPrintError('Ticket was placed, but printing failed. Reprint will not place the bet again.');
+      setTicketStatus({type: 'error', message: 'Ticket placed; receipt printing failed.'});
+      return false;
     }
-
-    resetPlacedTicketSlip();
-    setPrintError('');
   };
 
   const submitTicket = async () => {
@@ -3089,15 +3122,19 @@ const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
       }
 
       const receiptId = placed.receiptId ?? '';
-      setTicketStatus({type: 'success', message: `Ticket placed. Receipt: ${receiptId}`});
-      setPlacedTicket({
+      const ticketForPrinting = {
         placed,
         selections: submittedSlip,
         stake: submittedStake,
         totalOdds: submittedTotalOdds,
         possibleWin: submittedPossibleWin,
         shopCode: payload.shopCode,
-      });
+      };
+      // Placement is complete at this point. Clear immediately so a print error can never
+      // leave the submitted slip available for an accidental second placement.
+      resetPlacedTicketSlip();
+      setTicketStatus({type: 'success', message: `Ticket ${receiptId} placed / preparing receipt...`});
+      await printPlacedTicketReceipt(ticketForPrinting);
     } catch (err) {
       console.error('Virtual ticket submit error:', err);
       setTicketStatus({
@@ -3524,46 +3561,10 @@ const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
         onClose={() => setPayoutOpen(false)}
       />
 
-      {placedTicket && (
-        <div className="ticket-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="ticket-success-title">
-          <div className="ticket-modal">
-            <div className="ticket-modal-header" id="ticket-success-title">
-              Ticket placed successfully
-            </div>
-            <div className="ticket-modal-body">
-              <div className="ticket-modal-row">
-                <span>ReceiptId</span>
-                <strong>{placedTicket.placed.receiptId || '-'}</strong>
-              </div>
-              <div className="ticket-modal-row">
-                <span>Serial</span>
-                <strong>{placedTicket.placed.serial || '-'}</strong>
-              </div>
-              <div className="ticket-modal-row">
-                <span>SetNo</span>
-                <strong>{placedTicket.placed.activeSetNo || '-'}</strong>
-              </div>
-              <div className="ticket-modal-row">
-                <span>Selections</span>
-                <strong>{placedTicket.selections.length}</strong>
-              </div>
-              <div className="ticket-modal-row">
-                <span>Possible Win</span>
-                <strong>{formatMoney(placedTicket.possibleWin)}</strong>
-              </div>
-              {printError && (
-                <div className="ticket-modal-error">{printError}</div>
-              )}
-            </div>
-            <div className="ticket-modal-actions">
-              <button className="ticket-modal-action print" onClick={printPlacedTicketReceipt} type="button">
-                PRINT RECEIPT
-              </button>
-              <button className="ticket-modal-action close" onClick={closePlacedTicketPopup} type="button">
-                CLOSE
-              </button>
-            </div>
-          </div>
+      {placedTicket && printError && (
+        <div className="ticket-print-failure" role="alert">
+          <span>{printError}</span>
+          <button onClick={() => printPlacedTicketReceipt(placedTicket, {manual: true})} type="button">REPRINT</button>
         </div>
       )}
     </main>
