@@ -66,7 +66,7 @@ export const createCode128Svg = (rawValue) => {
   return `<svg class="barcode" viewBox="0 0 ${x + 10} 42" role="img" aria-label="Ticket barcode ${escapeHtml(value)}" xmlns="http://www.w3.org/2000/svg">${bars.join('')}</svg>`;
 };
 
-export const normalizeVirtualReceipt = ({details, placed, selections = [], stake, possibleWin, shopCode, terminal}) => {
+export const normalizeVirtualReceipt = ({details, placed, selections = [], stake, possibleWin, shopDisplayName, shopCode, terminal}) => {
   const root = valueOf(details, ['ticket', 'Ticket', 'receipt', 'Receipt'], details || placed || {});
   const backendSelections = arrayOf(details, ['bets', 'Bets', 'selections', 'Selections', 'ticketBets', 'TicketBets']);
   const nestedSelections = arrayOf(root, ['bets', 'Bets', 'selections', 'Selections', 'ticketBets', 'TicketBets']);
@@ -75,9 +75,11 @@ export const normalizeVirtualReceipt = ({details, placed, selections = [], stake
   const receiptId = valueOf(root, ['receiptId', 'ReceiptId'], valueOf(placed, ['receiptId', 'ReceiptId']));
   const ticketNumber = valueOf(root, ['ticketNumber', 'TicketNumber', 'serialCode', 'SerialCode', 'serial', 'Serial'],
     valueOf(placed, ['ticketNumber', 'TicketNumber', 'serialCode', 'SerialCode', 'serial', 'Serial'], receiptId));
+  const printedShop = valueOf(placed, ['shopDisplayName', 'ShopDisplayName'], shopDisplayName)
+    || valueOf(root, ['shopDisplayName', 'ShopDisplayName', 'shopCode', 'ShopCode', 'terminalCode', 'TerminalCode'], terminal?.code || shopCode || '-');
 
   return {
-    shop: valueOf(root, ['shopCode', 'ShopCode', 'terminalCode', 'TerminalCode'], terminal?.code || shopCode || '-'),
+    shopDisplayName: printedShop,
     ticketNumber: ticketNumber || receiptId || '-',
     barcodeValue: ticketNumber || receiptId || '',
     bookedAt: valueOf(root, ['receiptDate', 'ReceiptDate', 'bookTime', 'BookTime', 'placedAt', 'PlacedAt', 'createdAt', 'CreatedAt'],
@@ -121,7 +123,7 @@ export const printVirtualReceipt = (input) => {
     .pick-line span:nth-child(2){flex:1;min-width:0;overflow-wrap:anywhere}.pick-line strong{white-space:nowrap;text-align:right}.barcode{display:block;width:100%;height:20mm;margin:2mm auto 0;shape-rendering:crispEdges}
     .barcode-text{text-align:center;font-size:10px;overflow-wrap:anywhere;margin-top:.5mm}@media print{html,body{width:80mm}.receipt{width:72mm}}
   </style></head><body><main class="receipt">
-    <div class="row"><span>Shop</span><strong>${escapeHtml(receipt.shop)}</strong></div>
+    <div class="row"><span>Shop</span><strong>${escapeHtml(receipt.shopDisplayName || receipt.shop)}</strong></div>
     <div class="row"><span>Ticket</span><strong>${escapeHtml(receipt.ticketNumber)}</strong></div>
     <div class="row"><span>Book time</span><strong>${escapeHtml(formatDate(receipt.bookedAt))}</strong></div>
     <div class="rule"></div>${rows}<div class="rule"></div>

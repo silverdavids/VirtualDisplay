@@ -12,14 +12,17 @@ describe('virtual thermal receipt', () => {
           minWin: 5180,
           possibleWin: 5180,
           currency: 'USh',
+          shopDisplayName: 'stale-details-shop',
         },
         bets: [{providerMatchId: '254418534010', homeTeam: 'BOU', awayTeam: 'SHU', market: 'WIN', option: 'SHU', betOdd: 2.59}],
       },
+      placed: {shopDisplayName: 'ntantamuki-vcash'},
       shopCode: 'fallback-shop',
     });
 
     expect(receipt.ticketNumber).toBe('212697007925');
     expect(receipt.barcodeValue).toBe('212697007925');
+    expect(receipt.shopDisplayName).toBe('ntantamuki-vcash');
     expect(receipt.stake).toBe(2000);
     expect(receipt.selections).toHaveLength(1);
     expect(createCode128Svg(receipt.barcodeValue)).toContain('<svg');
@@ -44,7 +47,7 @@ describe('virtual thermal receipt', () => {
     jest.useFakeTimers();
 
     const printed = printVirtualReceipt({
-      shop: 'T01', ticketNumber: 'TICKET-1', barcodeValue: 'TICKET-1', bookedAt: '2026-08-06T11:23:00',
+      shopDisplayName: 'T01', ticketNumber: 'TICKET-1', barcodeValue: 'TICKET-1', bookedAt: '2026-08-06T11:23:00',
       stake: 4000, minWin: 5000, maxWin: 12000, currency: 'USh',
       selections: Array.from({length: 4}, (_, index) => ({eventId: index + 1, home: `Long home ${index}`, away: `Long away ${index}`, market: 'Match result', option: 'Home win', odd: 2})),
     });

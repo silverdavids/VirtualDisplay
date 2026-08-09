@@ -3062,13 +3062,14 @@ const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
 
     try {
       const details = await getVirtualTicketDetails(ticket.placed.receiptId);
-      const receipt = normalizeVirtualReceipt({...ticket, details, terminal});
-      const printed = printVirtualReceipt(receipt);
+      const printPayload = normalizeVirtualReceipt({...ticket, details, terminal});
+      if (process.env.NODE_ENV === 'development') console.log('print payload', printPayload);
+      const printed = printVirtualReceipt(printPayload);
       if (!printed) throw new Error('Receipt printer could not be opened.');
       if (!manual) autoPrintedTicketKeysRef.current.add(key);
       setPlacedTicket(null);
       setPrintError('');
-      setTicketStatus({type: 'success', message: `Ticket ${receipt.ticketNumber} placed / printing...`});
+      setTicketStatus({type: 'success', message: `Ticket ${printPayload.ticketNumber} placed / printing...`});
       return true;
     } catch (error) {
       console.error('Virtual ticket print error:', error);
@@ -3124,6 +3125,7 @@ const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
       const receiptId = placed.receiptId ?? '';
       const ticketForPrinting = {
         placed,
+        shopDisplayName: placed.shopDisplayName,
         selections: submittedSlip,
         stake: submittedStake,
         totalOdds: submittedTotalOdds,
