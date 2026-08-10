@@ -37,6 +37,7 @@ jobs:
           CI: "false"
           REACT_APP_TERMINAL_CODE: DISPLAY-001
           REACT_APP_DISPLAY_VERSION: 1.0.0
+          REACT_APP_BUILD_SHA: ${{ github.sha }}
         run: npm run build
 
   docker:
@@ -78,6 +79,8 @@ jobs:
             ${{ steps.image.outputs.repository }}:latest
             ${{ steps.image.outputs.repository }}:${{ github.sha }}
           build-args: |
+            BUILD_SHA=${{ github.sha }}
+            REPOSITORY_URL=https://github.com/${{ github.repository }}
             REACT_APP_TERMINAL_CODE=DISPLAY-001
             REACT_APP_DISPLAY_VERSION=1.0.0
           cache-from: type=gha

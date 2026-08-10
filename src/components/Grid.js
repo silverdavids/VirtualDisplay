@@ -21,6 +21,7 @@ import {
 } from '../services/ticketApi';
 import {DEFAULT_LEAGUE_ID, DEFAULT_PROVIDER, getDisplay, getLeagues} from '../services/virtualApi';
 import {getVirtualTicketDetails} from '../services/virtualTicketsApi';
+import {BUILD_SHA, shortBuildSha} from '../config/buildInfo';
 import {normalizeVirtualReceipt, printVirtualReceipt} from '../utils/printVirtualReceipt';
 import {parseVirtualShortcut, resolveVirtualShortcut} from '../keyboard/virtualShortcutParser';
 import {useVirtualKeyboardShortcuts} from '../keyboard/useVirtualKeyboardShortcuts';
@@ -3474,6 +3475,7 @@ const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
         <div className="footer-meta">
           <span>© Virtual Horizon</span>
           <span>Virtual Display V{process.env.REACT_APP_DISPLAY_VERSION || '1.0.0'}</span>
+          <span title={`Full build SHA: ${BUILD_SHA}`}>Build {shortBuildSha()}</span>
           <span><span className="secure-dot">●</span> Secure connection &nbsp; {formatClockTime(new Date(currentTime))}</span>
         </div>
         <div className="display-action-dock" aria-label="Display actions">

@@ -21,11 +21,19 @@ const formatMoney = (value, currency = 'USh') => {
   return `${new Intl.NumberFormat('en-UG', {maximumFractionDigits: 2}).format(amount)} ${currency}`;
 };
 
-const formatDate = (value) => {
+export const formatKampalaDateTime = (value) => {
   const date = value ? new Date(value) : null;
   if (!date || Number.isNaN(date.getTime())) return value ? String(value) : '-';
-  const part = (number) => String(number).padStart(2, '0');
-  return `${part(date.getDate())}.${part(date.getMonth() + 1)}.${part(date.getFullYear() % 100)} ${part(date.getHours())}:${part(date.getMinutes())}`;
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Africa/Kampala',
+    day: '2-digit',
+    month: '2-digit',
+    year: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date).reduce((result, part) => ({...result, [part.type]: part.value}), {});
+  return `${parts.day}.${parts.month}.${parts.year} ${parts.hour}:${parts.minute}`;
 };
 
 const formatEventTime = (value) => {
@@ -82,8 +90,7 @@ export const normalizeVirtualReceipt = ({details, placed, selections = [], stake
     shopDisplayName: printedShop,
     ticketNumber: ticketNumber || receiptId || '-',
     barcodeValue: ticketNumber || receiptId || '',
-    bookedAt: valueOf(root, ['receiptDate', 'ReceiptDate', 'bookTime', 'BookTime', 'placedAt', 'PlacedAt', 'createdAt', 'CreatedAt'],
-      valueOf(placed, ['receiptDate', 'ReceiptDate', 'placedAt', 'PlacedAt', 'createdAt', 'CreatedAt'])),
+    bookedAtUtc: valueOf(root, ['bookedAtUtc', 'BookedAtUtc'], valueOf(placed, ['bookedAtUtc', 'BookedAtUtc'])),
     stake: valueOf(root, ['stake', 'Stake', 'totalStake', 'TotalStake'], stake),
     minWin: valueOf(root, ['minWin', 'MinWin', 'minimumWin', 'MinimumWin'], null),
     maxWin: valueOf(root, ['maxWin', 'MaxWin', 'maximumWin', 'MaximumWin', 'possibleWin', 'PossibleWin'], possibleWin),
@@ -117,15 +124,15 @@ export const printVirtualReceipt = (input) => {
   printWindow.document.open();
   printWindow.document.write(`<!doctype html><html><head><title>Ticket ${escapeHtml(receipt.ticketNumber)}</title><style>
     @page{size:80mm auto;margin:0}*{box-sizing:border-box}html,body{margin:0;padding:0;width:80mm;background:#fff;color:#000}
-    body{font:12px/1.18 "Courier New",monospace}.receipt{width:72mm;margin:0;padding:2mm 1.5mm}.rule{border-top:.25mm solid #000;margin:1.5mm 0}
+    body{font:700 12px/1.2 Arial,sans-serif;-webkit-print-color-adjust:exact;print-color-adjust:exact}.receipt{width:72mm;margin:0;padding:2mm 1.5mm}.rule{border-top:.5mm solid #000;margin:1.5mm 0}
     .row,.event-line,.pick-line{display:flex;justify-content:space-between;gap:2mm}.row span:first-child{white-space:nowrap}.row strong{text-align:right;overflow-wrap:anywhere}
     .selection{padding:1.2mm 0;break-inside:avoid;page-break-inside:avoid}.event-line span{min-width:0;overflow-wrap:anywhere}.pick-line{padding-left:5mm;margin-top:.7mm;align-items:flex-start}
-    .pick-line span:nth-child(2){flex:1;min-width:0;overflow-wrap:anywhere}.pick-line strong{white-space:nowrap;text-align:right}.barcode{display:block;width:100%;height:20mm;margin:2mm auto 0;shape-rendering:crispEdges}
-    .barcode-text{text-align:center;font-size:10px;overflow-wrap:anywhere;margin-top:.5mm}@media print{html,body{width:80mm}.receipt{width:72mm}}
+    .pick-line span:nth-child(2){flex:1;min-width:0;overflow-wrap:anywhere}.pick-line strong{white-space:nowrap;text-align:right}.barcode{display:block;width:100%;height:22mm;margin:2mm auto 0;fill:#000;shape-rendering:crispEdges}
+    .barcode-text{text-align:center;font-size:11px;font-weight:900;overflow-wrap:anywhere;margin-top:.5mm}@media print{html,body{width:80mm}.receipt{width:72mm}body{-webkit-text-stroke:.08px #000}}
   </style></head><body><main class="receipt">
     <div class="row"><span>Shop</span><strong>${escapeHtml(receipt.shopDisplayName || receipt.shop)}</strong></div>
     <div class="row"><span>Ticket</span><strong>${escapeHtml(receipt.ticketNumber)}</strong></div>
-    <div class="row"><span>Book time</span><strong>${escapeHtml(formatDate(receipt.bookedAt))}</strong></div>
+    <div class="row"><span>Book time</span><strong>${escapeHtml(formatKampalaDateTime(receipt.bookedAtUtc))}</strong></div>
     <div class="rule"></div>${rows}<div class="rule"></div>
     <div class="row"><span>Total stake</span><strong>${escapeHtml(formatMoney(receipt.stake, receipt.currency))}</strong></div>
     <div class="row"><span>Min/Max win</span><strong>${escapeHtml(formatMoney(receipt.minWin, receipt.currency))} / ${escapeHtml(formatMoney(receipt.maxWin, receipt.currency))}</strong></div>
