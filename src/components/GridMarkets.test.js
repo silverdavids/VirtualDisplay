@@ -18,6 +18,34 @@ test('maps provider market codes to canonical market pages', () => {
   expect(getCanonicalMarketCode({code: 'BTTS'})).toBe('BTS');
 });
 
+test.each(['1X2', 'BTS', 'DC', 'CS', 'TG'])(
+  '%s does not fabricate a line from its market code',
+  (code) => {
+    const [market] = normalizeEventMarkets({
+      markets: [{code, selections: [{name: '1', odd: 3.16}]}],
+    });
+
+    expect(market.selections[0].line).toBeNull();
+  },
+);
+
+test('preserves authoritative selection line and MatchOddId fields', () => {
+  const [market] = normalizeEventMarkets({
+    markets: [{
+      code: 'OU',
+      selections: [{name: 'Over', odd: 1.8, Line: 2.5, MatchOddId: 17451454}],
+    }],
+  });
+
+  expect(market.selections[0]).toMatchObject({line: 2.5, matchOddId: 17451454});
+});
+
+test('preserves a genuine line encoded in the upstream totals selection key', () => {
+  const [market] = normalizeEventMarkets({markets: {overUnder: {'OV 3.5': 2.15}}});
+
+  expect(market.selections[0]).toMatchObject({label: 'OV3.5', line: 3.5});
+});
+
 test('builds the MAIN tab from 1X2, double chance, BTS, and over/under', () => {
   const event = eventWith([
     {code: '1X2', selections: [{name: '1', odd: 2}, {name: 'X', odd: 3}, {name: '2', odd: 4}]},

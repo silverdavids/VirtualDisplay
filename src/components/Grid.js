@@ -28,6 +28,7 @@ import {useVirtualKeyboardShortcuts} from '../keyboard/useVirtualKeyboardShortcu
 import TicketCancelModal from './TicketCancelModal';
 import TicketPayoutModal from './TicketPayoutModal';
 import {reconcileCountdownDeadline} from './countdownDeadline';
+import {buildVirtualTicketPayload} from '../tickets/buildVirtualTicketPayload';
 import connectSocket, {
   VIRTUAL_DISPLAY_UPDATED_EVENT,
   VIRTUAL_EVENTS_QUEUE_UPDATED_EVENT,
@@ -103,10 +104,24 @@ const getRawMarketCode = (market) =>
   market?.code ?? market?.marketCode ?? market?.market_code ?? market?.n ?? market?.name ?? market?.key ?? '';
 
 const getMarketLine = (market, code = '') => {
-  const directLine = market?.line ?? market?.goalLine ?? market?.handicap ?? market?.h;
+  const directLine = market?.line ?? market?.Line ?? market?.goalLine ?? market?.GoalLine ??
+    market?.handicap ?? market?.Handicap ?? market?.h;
   if (directLine !== undefined && directLine !== null && directLine !== '') return Number(directLine);
-  const codeLines = [...String(code).matchAll(/\d+(?:\.\d+)?/g)];
-  return codeLines.length > 0 ? Number(codeLines.at(-1)[0]) : null;
+  const encodedLine = String(code).match(/(?:OU|OVER.?UNDER)[_\s-]?(\d+(?:\.\d+)?)$/i)?.[1];
+  return encodedLine === undefined ? null : Number(encodedLine);
+};
+
+const getSelectionLine = (selection, marketCode, marketLine) => {
+  const directLine = selection?.line ?? selection?.Line ?? selection?.goalLine ??
+    selection?.GoalLine ?? selection?.handicap ?? selection?.Handicap;
+  if (directLine !== undefined && directLine !== null && directLine !== '') return Number(directLine);
+  if (marketLine !== null) return marketLine;
+  if (!['OU', 'HOME_OU', 'AWAY_OU'].includes(marketCode) && !marketCode.startsWith('1X2_OU_')) {
+    return null;
+  }
+
+  const encodedLine = String(getSelectionName(selection)).match(/\d+(?:\.\d+)?/)?.[0];
+  return encodedLine === undefined ? null : Number(encodedLine);
 };
 
 export const getCanonicalMarketCode = (market) => {
@@ -189,15 +204,18 @@ const normalizeMarket = (market) => {
   const line = getMarketLine(market, getRawMarketCode(market));
   const rawSelections = getMarketSelections(market);
   const selections = (rawSelections.length > 0 ? rawSelections : objectSelections(market))
-    .map((selection, index) => ({
-      key: `${code}:${getCanonicalSelectionLabel(selection, code, line, index)}`,
-      label: getCanonicalSelectionLabel(selection, code, line, index),
-      odd: getSelectionOdd(selection),
-      marketCode: code,
-      marketName: getRawMarketCode(market) || MARKET_TITLES[code] || code,
-      line,
-      matchOddId: selection?.matchOddId ?? selection?.oddId ?? selection?.id ?? null,
-    }))
+    .map((selection, index) => {
+      return {
+        key: `${code}:${getCanonicalSelectionLabel(selection, code, line, index)}`,
+        label: getCanonicalSelectionLabel(selection, code, line, index),
+        odd: getSelectionOdd(selection),
+        marketCode: code,
+        marketName: getRawMarketCode(market) || MARKET_TITLES[code] || code,
+        line: getSelectionLine(selection, code, line),
+        matchOddId: selection?.matchOddId ?? selection?.MatchOddId ?? selection?.oddId ??
+          selection?.OddId ?? selection?.id ?? selection?.Id ?? null,
+      };
+    })
     .filter(({odd}) => odd !== undefined && odd !== null && odd !== '');
 
   return {code, line, name: getRawMarketCode(market) || MARKET_TITLES[code] || code, selections};
@@ -3000,12 +3018,12 @@ const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
       match: `${match.home} vs ${match.away}`,
       providerMatchId,
       matchId,
-      matchOddId: selection.matchOddId ?? match.matchOddId ?? null,
+      matchOddId: selection.matchOddId ?? match.matchOddId ?? match.MatchOddId ?? null,
       homeTeam: match.homeTeam ?? match.home ?? '',
       awayTeam: match.awayTeam ?? match.away ?? '',
       market: selection.marketCode,
       option: selection.label,
-      line: selection.line ?? getLineFromOption(selection.label),
+      line: selection.line ?? null,
       odd,
       selectionKey: selection.key,
       shortCode: match.shortCode ?? '',
@@ -3027,29 +3045,7 @@ const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
   const selectedPickFor = (match, selectionKey) =>
     slip.some((pick) => pick.id === `${match.home}-${match.away}` && pick.selectionKey === selectionKey);
 
-  const buildTicketPayload = () => ({
-    source: 'VirtualDisplay',
-    provider: display.provider ?? PROVIDER,
-    providerEventId: (display.providerEventId ?? display.activeProviderEventId ?? '').toString(),
-    externalTicketId: `VD-${Date.now()}`,
-    sourceDisplayId: 'test',
-    shopCode: '1',
-    userId: 'f78187cd-bef7-4f16-8728-3a0031125879',
-    username: '',
-    stake: Number(stake),
-    selections: slip.map((selection) => ({
-      providerMatchId: String(selection.providerMatchId ?? selection.matchId ?? ''),
-      matchId: Number(selection.matchId ?? 0),
-      matchOddId: selection.matchOddId && selection.matchOddId > 0 ? selection.matchOddId : null,
-      homeTeam: selection.homeTeam,
-      awayTeam: selection.awayTeam,
-      market: selection.market,
-      option: selection.option,
-      line: selection.line ?? 0,
-      odd: Number(selection.odd),
-      shortCode: selection.shortCode ?? '',
-    })),
-  });
+  const buildTicketPayload = () => buildVirtualTicketPayload({display, slip, stake});
 
   const resetPlacedTicketSlip = () => {
     setSlip([]);

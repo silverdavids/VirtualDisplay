@@ -1,0 +1,23 @@
+export const buildVirtualTicketPayload = ({display, slip, stake, now = Date.now()}) => ({
+  source: 'VirtualDisplay',
+  provider: display.provider ?? 'VirtualHorizon',
+  providerEventId: (display.providerEventId ?? display.activeProviderEventId ?? '').toString(),
+  externalTicketId: `VD-${now}`,
+  sourceDisplayId: 'test',
+  shopCode: '1',
+  userId: 'f78187cd-bef7-4f16-8728-3a0031125879',
+  username: '',
+  stake: Number(stake),
+  selections: slip.map((selection) => ({
+    providerMatchId: String(selection.providerMatchId ?? selection.matchId ?? ''),
+    matchId: Number(selection.matchId ?? 0),
+    matchOddId: selection.matchOddId ?? null,
+    homeTeam: selection.homeTeam,
+    awayTeam: selection.awayTeam,
+    market: selection.market,
+    option: selection.option,
+    line: selection.line ?? null,
+    odd: Number(selection.odd),
+    shortCode: selection.shortCode ?? '',
+  })),
+});
