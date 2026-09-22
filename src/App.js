@@ -2,6 +2,8 @@ import {useCallback, useEffect, useState} from 'react';
 import {Grid, ResultsDisplay, TicketsPage} from './components';
 import TerminalLogin from './components/auth/TerminalLogin';
 import TerminalStatus from './components/auth/TerminalStatus';
+import ShopTV from './tv/ShopTV';
+import {LEAGUES, readSelectedLeague} from './hooks/useLeagueFeed';
 import {
   getTerminalSession,
   isTerminalAuthenticated,
@@ -38,6 +40,7 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (location.path === '/tv' || location.path.startsWith('/tv/')) return;
     if (!authenticated && location.path !== '/login') {
       navigate(`/login?from=${encodeURIComponent(`${location.path}${location.search}`)}`, {replace: true});
     } else if (authenticated && location.path === '/login') {
@@ -46,6 +49,10 @@ function App() {
       navigate(safePath, {replace: true});
     }
   }, [authenticated, location.path, location.search, navigate]);
+
+  if (location.path === '/tv' || location.path.startsWith('/tv/')) {
+    return <ShopTV path={location.path} search={location.search} navigate={navigate}/>;
+  }
 
   if (!authenticated) {
     return <TerminalLogin onAuthenticated={() => setAuthenticated(true)} />;
@@ -62,12 +69,14 @@ function App() {
   if (ticketsOpen) {
     content = <TicketsPage onBackToDisplay={() => navigate('/')} />;
   } else if (resultsOpen) {
-    content = <ResultsDisplay onBackToBetting={() => navigate('/')} />;
+    const requestedLeague = new URLSearchParams(location.search).get('leagueId');
+    const leagueId = LEAGUES.some(({id}) => id === requestedLeague) ? requestedLeague : readSelectedLeague();
+    content = <ResultsDisplay key={leagueId} leagueId={leagueId} onBackToBetting={() => navigate('/')} />;
   } else {
     content = (
       <Grid
         onLogout={logout}
-        onOpenResults={() => openDisplayPageInNewTab('/results')}
+        onOpenResults={(leagueId) => openDisplayPageInNewTab(`/results?leagueId=${leagueId}`)}
         onOpenTickets={() => openDisplayPageInNewTab('/tickets')}
         terminal={terminal}
       />

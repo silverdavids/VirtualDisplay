@@ -1,0 +1,248 @@
+{
+  "capturedAt": "2026-09-18T14:00:51.279Z",
+  "source": "http://45.77.54.107:10006",
+  "leagues": {
+    "21": {
+      "providerEventId": "785404043",
+      "weekNumber": "24",
+      "marketIds": [
+        "1X2",
+        "CS",
+        "TG",
+        "OU",
+        "TEAM_GOALS_HOME_AWAY",
+        "OVER_UNDER_1X2",
+        "BTS",
+        "DC",
+        "DOUBLE_CHANCE_X21",
+        "DOUBLE_CHANCE_1X2",
+        "DOUBLE_CHANCE_12X"
+      ],
+      "missingOutcomes": [
+        {
+          "providerMatchId": "2606973022",
+          "fixture": "MUN vs PSV",
+          "marketId": "TEAM_GOALS_HOME_AWAY",
+          "outcome": "UNDER_2.5_AWAY"
+        },
+        {
+          "providerMatchId": "2606973022",
+          "fixture": "MUN vs PSV",
+          "marketId": "TEAM_GOALS_HOME_AWAY",
+          "outcome": "UNDER_3.5_AWAY"
+        },
+        {
+          "providerMatchId": "2606973024",
+          "fixture": "LIV vs BAR",
+          "marketId": "TEAM_GOALS_HOME_AWAY",
+          "outcome": "UNDER_3.5_HOME"
+        },
+        {
+          "providerMatchId": "2606973024",
+          "fixture": "LIV vs BAR",
+          "marketId": "TEAM_GOALS_HOME_AWAY",
+          "outcome": "UNDER_3.5_AWAY"
+        },
+        {
+          "providerMatchId": "2606973026",
+          "fixture": "NAP vs AEK",
+          "marketId": "TEAM_GOALS_HOME_AWAY",
+          "outcome": "UNDER_2.5_AWAY"
+        },
+        {
+          "providerMatchId": "2606973026",
+          "fixture": "NAP vs AEK",
+          "marketId": "TEAM_GOALS_HOME_AWAY",
+          "outcome": "UNDER_3.5_AWAY"
+        },
+        {
+          "providerMatchId": "2606973027",
+          "fixture": "CHE vs JUV",
+          "marketId": "TEAM_GOALS_HOME_AWAY",
+          "outcome": "UNDER_3.5_HOME"
+        },
+        {
+          "providerMatchId": "2606973029",
+          "fixture": "ROM vs ATM",
+          "marketId": "TEAM_GOALS_HOME_AWAY",
+          "outcome": "UNDER_3.5_HOME"
+        },
+        {
+          "providerMatchId": "2606973029",
+          "fixture": "ROM vs ATM",
+          "marketId": "TEAM_GOALS_HOME_AWAY",
+          "outcome": "UNDER_3.5_AWAY"
+        },
+        {
+          "providerMatchId": "2606973031",
+          "fixture": "PSG vs CEL",
+          "marketId": "TEAM_GOALS_HOME_AWAY",
+          "outcome": "UNDER_2.5_AWAY"
+        },
+        {
+          "providerMatchId": "2606973031",
+          "fixture": "PSG vs CEL",
+          "marketId": "TEAM_GOALS_HOME_AWAY",
+          "outcome": "UNDER_3.5_AWAY"
+        },
+        {
+          "providerMatchId": "2606973032",
+          "fixture": "RMA vs ZEN",
+          "marketId": "DC",
+          "outcome": "1X"
+        },
+        {
+          "providerMatchId": "2606973032",
+          "fixture": "RMA vs ZEN",
+          "marketId": "TEAM_GOALS_HOME_AWAY",
+          "outcome": "UNDER_2.5_AWAY"
+        },
+        {
+          "providerMatchId": "2606973032",
+          "fixture": "RMA vs ZEN",
+          "marketId": "TEAM_GOALS_HOME_AWAY",
+          "outcome": "UNDER_3.5_AWAY"
+        },
+        {
+          "providerMatchId": "2606973033",
+          "fixture": "BAS vs BEN",
+          "marketId": "TEAM_GOALS_HOME_AWAY",
+          "outcome": "UNDER_3.5_AWAY"
+        },
+        {
+          "providerMatchId": "2606973035",
+          "fixture": "FCB vs BVB",
+          "marketId": "TEAM_GOALS_HOME_AWAY",
+          "outcome": "UNDER_3.5_AWAY"
+        },
+        {
+          "providerMatchId": "2606973037",
+          "fixture": "MAR vs MCI",
+          "marketId": "TEAM_GOALS_HOME_AWAY",
+          "outcome": "UNDER_3.5_HOME"
+        }
+      ]
+    },
+    "78": {
+      "providerEventId": "785406553",
+      "weekNumber": "11",
+      "marketIds": [
+        "1X2",
+        "CS",
+        "TG",
+        "OU",
+        "TEAM_GOALS_HOME_AWAY",
+        "OVER_UNDER_1X2",
+        "BTS",
+        "DC",
+        "DOUBLE_CHANCE_X21",
+        "DOUBLE_CHANCE_1X2",
+        "DOUBLE_CHANCE_12X"
+      ],
+      "missingOutcomes": [
+        {
+          "providerMatchId": "2606982104",
+          "fixture": "LIV vs LUT",
+          "marketId": "TEAM_GOALS_HOME_AWAY",
+          "outcome": "UNDER_3.5_AWAY"
+        },
+        {
+          "providerMatchId": "2606982106",
+          "fixture": "MNC vs WOL",
+          "marketId": "TEAM_GOALS_HOME_AWAY",
+          "outcome": "UNDER_2.5_AWAY"
+        },
+        {
+          "providerMatchId": "2606982106",
+          "fixture": "MNC vs WOL",
+          "marketId": "TEAM_GOALS_HOME_AWAY",
+          "outcome": "UNDER_3.5_AWAY"
+        },
+        {
+          "providerMatchId": "2606982108",
+          "fixture": "BOU vs FUL",
+          "marketId": "TEAM_GOALS_HOME_AWAY",
+          "outcome": "UNDER_3.5_HOME"
+        },
+        {
+          "providerMatchId": "2606982108",
+          "fixture": "BOU vs FUL",
+          "marketId": "TEAM_GOALS_HOME_AWAY",
+          "outcome": "UNDER_3.5_AWAY"
+        },
+        {
+          "providerMatchId": "2606982111",
+          "fixture": "TOT vs NOT",
+          "marketId": "TEAM_GOALS_HOME_AWAY",
+          "outcome": "UNDER_2.5_AWAY"
+        },
+        {
+          "providerMatchId": "2606982111",
+          "fixture": "TOT vs NOT",
+          "marketId": "TEAM_GOALS_HOME_AWAY",
+          "outcome": "UNDER_3.5_AWAY"
+        },
+        {
+          "providerMatchId": "2606982112",
+          "fixture": "BRE vs AST",
+          "marketId": "TEAM_GOALS_HOME_AWAY",
+          "outcome": "UNDER_3.5_HOME"
+        },
+        {
+          "providerMatchId": "2606982112",
+          "fixture": "BRE vs AST",
+          "marketId": "TEAM_GOALS_HOME_AWAY",
+          "outcome": "UNDER_3.5_AWAY"
+        },
+        {
+          "providerMatchId": "2606982113",
+          "fixture": "ARS vs CHE",
+          "marketId": "TEAM_GOALS_HOME_AWAY",
+          "outcome": "UNDER_3.5_HOME"
+        },
+        {
+          "providerMatchId": "2606982113",
+          "fixture": "ARS vs CHE",
+          "marketId": "TEAM_GOALS_HOME_AWAY",
+          "outcome": "UNDER_3.5_AWAY"
+        },
+        {
+          "providerMatchId": "2606982114",
+          "fixture": "MNU vs NEW",
+          "marketId": "TEAM_GOALS_HOME_AWAY",
+          "outcome": "UNDER_3.5_AWAY"
+        },
+        {
+          "providerMatchId": "2606982115",
+          "fixture": "BUR vs WHU",
+          "marketId": "TEAM_GOALS_HOME_AWAY",
+          "outcome": "UNDER_3.5_HOME"
+        },
+        {
+          "providerMatchId": "2606982115",
+          "fixture": "BUR vs WHU",
+          "marketId": "TEAM_GOALS_HOME_AWAY",
+          "outcome": "UNDER_3.5_AWAY"
+        },
+        {
+          "providerMatchId": "2606982117",
+          "fixture": "BHA vs CRY",
+          "marketId": "TEAM_GOALS_HOME_AWAY",
+          "outcome": "UNDER_3.5_HOME"
+        },
+        {
+          "providerMatchId": "2606982117",
+          "fixture": "BHA vs CRY",
+          "marketId": "TEAM_GOALS_HOME_AWAY",
+          "outcome": "UNDER_3.5_AWAY"
+        },
+        {
+          "providerMatchId": "2606982118",
+          "fixture": "EVE vs SHU",
+          "marketId": "TEAM_GOALS_HOME_AWAY",
+          "outcome": "UNDER_3.5_AWAY"
+        }
+      ]
+    }
+  }
+}

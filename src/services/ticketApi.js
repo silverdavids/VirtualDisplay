@@ -1,7 +1,7 @@
 import {getDisplayAuthHeaders, handleTerminalUnauthorized} from './displayAuthApi';
 import {buildApiUrl, VIRTUAL_TICKETS_API} from '../config/runtimeConfig';
 
-export const BETTING_CLOSED_MESSAGE = 'Betting closed. Waiting for the next virtual event.';
+export const BETTING_CLOSED_MESSAGE = 'Betting closed – games in progress';
 
 const postTicket = async (path, payload, {isBettingClosed = false} = {}) => {
   if (isBettingClosed) {

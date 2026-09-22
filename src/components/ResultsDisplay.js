@@ -8,18 +8,16 @@ import './ResultsDisplay.css';
 export const RESULTS_UPDATED_EVENT = 'resultsUpdated';
 
 const token = (value) => String(value ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
-const acceptedLeague = (board) =>
-  [board?.leagueId, board?.leagueNumber, board?.providerLeagueId]
-    .filter((value) => value !== undefined && value !== null && value !== '')
-    .some((value) => String(value) === String(DEFAULT_LEAGUE_ID));
+const acceptedLeague = (board, leagueId) =>
+  String(board?.leagueId ?? board?.providerLeagueId) === String(leagueId);
 
-export const isValidResultsBoard = (payload) => {
+export const isValidResultsBoard = (payload, leagueId = DEFAULT_LEAGUE_ID) => {
   const board = payload?.latestResult ?? payload?.result ?? payload?.data ?? payload;
   return Boolean(
     board &&
     typeof board === 'object' &&
     token(board.provider) === token(DEFAULT_PROVIDER) &&
-    acceptedLeague(board) &&
+    acceptedLeague(board, leagueId) &&
     Array.isArray(board.matches)
   );
 };
@@ -61,7 +59,7 @@ const formatUpdatedAt = (value) => {
   }).format(date);
 };
 
-const ResultsDisplay = ({onBackToBetting}) => {
+const ResultsDisplay = ({onBackToBetting, leagueId = DEFAULT_LEAGUE_ID}) => {
   const [board, setBoard] = useState(null);
   const [connectionStatus, setConnectionStatus] = useState('CONNECTING');
   const [loadError, setLoadError] = useState('');
@@ -72,7 +70,7 @@ const ResultsDisplay = ({onBackToBetting}) => {
   useEffect(() => {
     let mounted = true;
     const applyBoard = (payload) => {
-      if (mounted && isValidResultsBoard(payload)) {
+      if (mounted && isValidResultsBoard(payload, leagueId)) {
         const nextBoard = unwrapBoard(payload);
         const nextResultId = String(
           nextBoard.providerEventId ?? updatedAt(nextBoard) ?? 'current-result'
@@ -92,7 +90,7 @@ const ResultsDisplay = ({onBackToBetting}) => {
       }
     };
 
-    getLatestResults()
+    getLatestResults(leagueId)
       .then(applyBoard)
       .catch((error) => {
         if (mounted) setLoadError(error.message);
@@ -114,7 +112,7 @@ const ResultsDisplay = ({onBackToBetting}) => {
       socket.off('connect_error', disconnected);
       socket.off(RESULTS_UPDATED_EVENT, applyBoard);
     };
-  }, []);
+  }, [leagueId]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {

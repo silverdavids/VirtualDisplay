@@ -3,8 +3,8 @@ import {buildApiUrl, VIRTUAL_API_BASE_URL} from '../config/runtimeConfig';
 
 export const LATEST_RESULTS_PATH = '/api/virtual/results/latest';
 
-export const getLatestResults = async () => {
-  const response = await fetch(buildApiUrl(VIRTUAL_API_BASE_URL, LATEST_RESULTS_PATH), {
+export const getLatestResults = async (leagueId = '21') => {
+  const response = await fetch(buildApiUrl(VIRTUAL_API_BASE_URL, `${LATEST_RESULTS_PATH}?${new URLSearchParams({leagueId: String(leagueId)})}`), {
     cache: 'no-store',
     headers: await getDisplayAuthHeaders(),
   });

@@ -1,6 +1,7 @@
 export const buildVirtualTicketPayload = ({display, slip, stake, now = Date.now()}) => ({
   source: 'VirtualDisplay',
   provider: display.provider ?? 'VirtualHorizon',
+  leagueId: String(display.leagueId ?? ''),
   providerEventId: (display.providerEventId ?? display.activeProviderEventId ?? '').toString(),
   externalTicketId: `VD-${now}`,
   sourceDisplayId: 'test',

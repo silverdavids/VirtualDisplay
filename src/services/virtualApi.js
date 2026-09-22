@@ -1,10 +1,12 @@
 import {buildApiUrl, VIRTUAL_API_BASE_URL} from '../config/runtimeConfig';
 import {getDisplayAuthHeaders, handleTerminalUnauthorized} from './displayAuthApi';
+import {withServerClock} from './serverClock';
 
 export const DEFAULT_PROVIDER = 'VirtualHorizon';
 export const DEFAULT_LEAGUE_ID = '21';
 
 const request = async (path, options = {}) => {
+  const sentAt = Date.now();
   const response = await fetch(buildApiUrl(VIRTUAL_API_BASE_URL, path), {
     cache: 'no-store',
     ...options,
@@ -23,7 +25,8 @@ const request = async (path, options = {}) => {
     throw new Error(`Virtual-Api request failed: ${response.status} ${response.statusText}`);
   }
 
-  return response.json();
+  const payload = await response.json();
+  return Array.isArray(payload) ? payload : withServerClock(payload, Date.now(), sentAt);
 };
 
 const getLeagueArray = (payload) => {
@@ -44,7 +47,7 @@ export const getLeagues = async () => {
   return getLeagueArray(payload).map(normalizeLeague);
 };
 
-export const getDisplay = (provider, leagueId) => {
+export const getDisplay = (provider, leagueId, options = {}) => {
   const resolvedProvider = !provider || String(provider).toLowerCase() === 'all'
     ? DEFAULT_PROVIDER
     : provider;
@@ -57,5 +60,10 @@ export const getDisplay = (provider, leagueId) => {
     _: String(Date.now()),
   });
   console.log(`REST virtual display ${buildApiUrl(VIRTUAL_API_BASE_URL, `/api/virtual/display?${searchParams.toString()}`)}`);
-  return request(`/api/virtual/display?${searchParams.toString()}`);
+  return request(`/api/virtual/display?${searchParams.toString()}`, options);
+};
+
+export const getDisplayQueue = (provider, leagueId, options = {}) => {
+  const params = new URLSearchParams({provider, leagueId: String(leagueId)});
+  return request(`/api/virtual/display/queue?${params}`, options);
 };

@@ -19,7 +19,7 @@ import {
   placeVirtualTicket,
   validateVirtualTicket,
 } from '../services/ticketApi';
-import {DEFAULT_LEAGUE_ID, DEFAULT_PROVIDER, getDisplay, getLeagues} from '../services/virtualApi';
+import useLeagueFeed, {LEAGUES, weekKey} from '../hooks/useLeagueFeed';
 import {getVirtualTicketDetails} from '../services/virtualTicketsApi';
 import {BUILD_SHA, shortBuildSha} from '../config/buildInfo';
 import {normalizeVirtualReceipt, printVirtualReceipt} from '../utils/printVirtualReceipt';
@@ -27,23 +27,12 @@ import {parseVirtualShortcut, resolveVirtualShortcut} from '../keyboard/virtualS
 import {useVirtualKeyboardShortcuts} from '../keyboard/useVirtualKeyboardShortcuts';
 import TicketCancelModal from './TicketCancelModal';
 import TicketPayoutModal from './TicketPayoutModal';
-import {reconcileCountdownDeadline} from './countdownDeadline';
 import {buildVirtualTicketPayload} from '../tickets/buildVirtualTicketPayload';
-import connectSocket, {
-  VIRTUAL_DISPLAY_UPDATED_EVENT,
-  VIRTUAL_EVENTS_QUEUE_UPDATED_EVENT,
-} from '../socketio.service';
+import {boardState, boardNow, boardDeadline, bettingClosed, closedBoardMessage} from './boardLifecycle';
 
-const PROVIDER = DEFAULT_PROVIDER;
-const DEFAULT_STAKE = 1000;
+const DEFAULT_STAKE = 500;
 const LIVE_AFTER_MS = 10000;
 const STALE_AFTER_MS = 20000;
-const STALE_CHECK_INTERVAL_MS = 1000;
-const REST_FALLBACK_INTERVAL_MS = 4000;
-
-const normalizeProviderToken = (provider) =>
-  String(provider || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-
 const MARKET_TITLES = {
   '1X2': 'MAIN',
   DC: 'DOUBLE CHANCE',
@@ -68,33 +57,12 @@ const MARKET_SELECTION_ORDER = {
   BTS: ['GG', 'NG'],
 };
 
-const getArrayFromPayload = (payload, keys) => {
-  if (Array.isArray(payload)) return payload;
-  if (!payload || typeof payload !== 'object') return [];
-
-  for (const key of keys) {
-    if (Array.isArray(payload[key])) return payload[key];
-  }
-
-  if (payload.data && payload.data !== payload) {
-    return getArrayFromPayload(payload.data, keys);
-  }
-
-  return [];
-};
-
-const normalizeLeague = (league) => ({
-  ...league,
-  id: league.id ?? league.leagueId ?? league.leagueID ?? league.code,
-  name: league.name ?? league.leagueName ?? league.title ?? league.shortName ?? `League ${league.id ?? ''}`,
-});
-
 export const normalizeToken = (value) =>
   String(value ?? '').toUpperCase().replace(/[^A-Z0-9.]/g, '');
 
 const getSelectionName = (selection) =>
   selection?.name ?? selection?.selectionName ?? selection?.label ?? selection?.selectionCode ??
-  selection?.code ?? selection?.n ?? selection?.key ?? selection?.outcome ?? selection?.s ?? '';
+  selection?.code ?? selection?.n ?? selection?.key ?? selection?.outcome ?? selection?.s ?? selection?.providerName ?? '';
 
 const getSelectionOdd = (selection) =>
   selection?.odd ?? selection?.odds ?? selection?.price ?? selection?.value ?? selection?.v ??
@@ -129,12 +97,15 @@ export const getCanonicalMarketCode = (market) => {
   const token = normalizeToken(rawCode);
   const line = getMarketLine(market, rawCode);
 
-  if (['1X2', 'MATCHRESULT', 'MAIN', 'FULLTIMERESULT'].includes(token)) return '1X2';
+  if (['1X2', 'MATCHRESULT', 'MAIN', 'FULLTIMERESULT', 'WINNER', 'MATCHWINNER', 'FULLTIME'].includes(token)) return '1X2';
   if (['DC', 'DOUBLECHANCE'].includes(token)) return 'DC';
-  if (['BTS', 'BTTS', 'GGNG', 'GOALGOAL', 'BOTHTEAMSTOSCORE'].includes(token)) return 'BTS';
-  if (['OU', 'OVERUNDER', 'TOTALGOALS'].includes(token)) return 'OU';
-  if (['HOMEOU', 'HOMEOVERUNDER', 'HOMETOTAL', 'TEAM1OU', '1OU'].includes(token)) return 'HOME_OU';
-  if (['AWAYOU', 'AWAYOVERUNDER', 'AWAYTOTAL', 'TEAM2OU', '2OU'].includes(token)) return 'AWAY_OU';
+  if (['CS', 'SCORE', 'CORRECTSCORE'].includes(token)) return 'CS';
+  if (['BTS', 'BTTS', 'GGNG', 'GOALGOAL', 'GOALNOGOAL', 'BOTHTEAMSTOSCORE'].includes(token)) return 'BTS';
+  if (['OU', 'OVUN', 'OVERUNDER', 'TOTALGOALS'].includes(token)) return 'OU';
+  if (['HOMEOU', 'HOMEOVUN', 'HOMEOVERUNDER', 'HOMETOTAL', 'TEAM1OU', '1OU'].includes(token)) return 'HOME_OU';
+  if (['AWAYOU', 'AWAYOVUN', 'AWAYOVERUNDER', 'AWAYTOTAL', 'TEAM2OU', '2OU'].includes(token)) return 'AWAY_OU';
+  if (token === '1X2OVUN1.5') return '1X2_OU_1.5';
+  if (token === '1X2OVUN2.5') return '1X2_OU_2.5';
   if (['RESULTOVERUNDER15', 'RESULTOU15', '1X2OU15'].includes(token)) return '1X2_OU_1.5';
   if (['RESULTOVERUNDER25', 'RESULTOU25', '1X2OU25'].includes(token)) return '1X2_OU_2.5';
   if (token.includes('1X2') && (token.includes('OU') || token.includes('OVERUNDER'))) {
@@ -156,11 +127,15 @@ const getMarketSelections = (market) => {
 const selectionAliases = {
   HOME: '1', DRAW: 'X', AWAY: '2',
   HOMEDRAW: '1X', HOMEAWAY: '12', DRAWAWAY: 'X2',
+  HOMEORDRAW: '1X', HOMEORAWAY: '12', AWAYORDRAW: 'X2', GOAL: 'GG', NOGOAL: 'NG',
   YES: 'GG', NO: 'NG', O: 'OV', U: 'UN', OVER: 'OV', UNDER: 'UN',
 };
 
 const getCanonicalSelectionLabel = (selection, marketCode, line, index) => {
   const rawName = getSelectionName(selection);
+  if (marketCode === 'CS' && /^\d+\s*[-:]\s*\d+$/.test(String(rawName).trim())) {
+    return String(rawName).trim().replace(/\s*[-:]\s*/, '-');
+  }
   let token = normalizeToken(rawName);
   token = selectionAliases[token] ?? token;
   token = token.replace(/^OVER/, 'OV').replace(/^UNDER/, 'UN');
@@ -187,6 +162,7 @@ const getCanonicalSelectionLabel = (selection, marketCode, line, index) => {
 const MARKET_METADATA_KEYS = new Set([
   'CODE', 'MARKETCODE', 'MARKET_CODE', 'NAME', 'MARKETNAME', 'KEY',
   'LINE', 'GOALLINE', 'HANDICAP', 'H', 'TITLE',
+  'SUSPENDED', 'ISSUSPENDED', 'BLOCKED', 'AVAILABLE', 'STATUS',
 ]);
 
 const objectSelections = (market) => Object.entries(market ?? {})
@@ -195,9 +171,14 @@ const objectSelections = (market) => Object.entries(market ?? {})
     odd !== undefined &&
     odd !== null &&
     odd !== '' &&
-    typeof odd !== 'object'
+    (typeof odd !== 'object' || getSelectionOdd(odd) !== undefined)
   ))
-  .map(([name, odd]) => ({name, odd}));
+  .map(([name, odd]) => typeof odd === 'object' ? {...odd, name} : {name, odd});
+
+const oddsSuspended = value => normalizeBlocked(value?.blocked) === 1 ||
+  normalizeBlocked(value?.suspended ?? value?.isSuspended) === 1 || value?.available === false ||
+  ['SUSPENDED', 'CLOSED', 'UNAVAILABLE'].includes(String(value?.status || '').toUpperCase());
+const validOdd = odd => odd !== '' && odd != null && Number.isFinite(Number(odd)) && Number(odd) > 0;
 
 const normalizeMarket = (market) => {
   const code = getCanonicalMarketCode(market);
@@ -208,7 +189,7 @@ const normalizeMarket = (market) => {
       return {
         key: `${code}:${getCanonicalSelectionLabel(selection, code, line, index)}`,
         label: getCanonicalSelectionLabel(selection, code, line, index),
-        odd: getSelectionOdd(selection),
+        odd: oddsSuspended(market) || oddsSuspended(selection) ? undefined : getSelectionOdd(selection),
         marketCode: code,
         marketName: getRawMarketCode(market) || MARKET_TITLES[code] || code,
         line: getSelectionLine(selection, code, line),
@@ -216,7 +197,7 @@ const normalizeMarket = (market) => {
           selection?.OddId ?? selection?.id ?? selection?.Id ?? null,
       };
     })
-    .filter(({odd}) => odd !== undefined && odd !== null && odd !== '');
+    .filter(({odd}) => validOdd(odd));
 
   return {code, line, name: getRawMarketCode(market) || MARKET_TITLES[code] || code, selections};
 };
@@ -259,14 +240,39 @@ const getFlattenedMarketEntries = (event) => [
 export const normalizeBlocked = (value) =>
   ['0', 'FALSE', 'NO', ''].includes(String(value ?? 0).trim().toUpperCase()) ? 0 : 1;
 
+// Queue boards contain raw provider groups, unlike the expanded /display
+// response. Split each group using its own outcomes and preserve suspension,
+// selection identity and line metadata through the regular normalizer.
+const expandProviderMarket = market => {
+  const token = normalizeToken(getRawMarketCode(market));
+  const teamTotals = token === 'TEAMGOALSHOMEAWAY';
+  const resultTotals = token === 'OVERUNDER1X2';
+  if (!teamTotals && !resultTotals) return [market];
+  const groups = new Map();
+  getMarketSelections(market).forEach(selection => {
+    const match = String(getSelectionName(selection)).trim()
+      .match(/^(OVER|UNDER|OV|UN)[_\s-]?(\d+(?:\.\d+)?)[_\s-](HOME|DRAW|AWAY)$/i);
+    if (!match) return;
+    const [, direction, line, rawSide] = match;
+    const side = rawSide.toUpperCase();
+    if (teamTotals && side === 'DRAW') return;
+    const code = teamTotals ? `${side}_OU` : `1X2_OU_${Number(line)}`;
+    const total = /^(OVER|OV)$/i.test(direction) ? 'OV' : 'UN';
+    const name = teamTotals ? `${total}${line}` : `${{HOME:'1', DRAW:'X', AWAY:'2'}[side]}+${total}${line}`;
+    if (!groups.has(code)) groups.set(code, {...market, code, selections: []});
+    groups.get(code).selections.push({...selection, name, line:Number(line)});
+  });
+  return [...groups.values()];
+};
+
 export const normalizeEventMarkets = (event) => {
   const source = event.markets
     ? (Array.isArray(event.markets) ? event.markets : objectMarketEntries(event.markets))
-    : Array.isArray(event.odds) && event.odds.length > 0
-      ? event.odds.map((market) => ({...market, selections: market.selections ?? market.o}))
+    : event.odds && Object.keys(event.odds).length > 0
+      ? (Array.isArray(event.odds) ? event.odds.map((market) => ({...market, selections: market.selections ?? market.o})) : objectMarketEntries(event.odds))
       : getFlattenedMarketEntries(event);
 
-  return source.map(normalizeMarket).filter(({selections}) => selections.length > 0);
+  return source.flatMap(expandProviderMarket).map(normalizeMarket).filter(({selections}) => selections.length > 0);
 };
 
 const normalizeEvent = (event) => ({
@@ -276,10 +282,11 @@ const normalizeEvent = (event) => ({
   away: event.away ?? event.awayTeam ?? event.awayName ?? event.awayTeamName ?? '',
   marketPages: normalizeEventMarkets(event),
   odds: Array.isArray(event.odds) ? event.odds : [],
-  blocked: normalizeBlocked(event.blocked),
+  blocked: oddsSuspended(event) ? 1 : 0,
 });
 
 const getEventIdentity = (event, index) => {
+  if (event.providerMatchId != null) return `provider:${event.providerMatchId}`;
   const home = normalizeToken(event.home);
   const away = normalizeToken(event.away);
   if (home && away) return `teams:${home}:${away}`;
@@ -342,13 +349,14 @@ const isAdditionalOverUnderSelection = ({label, line}) => {
 };
 
 export const buildMarketTabs = (events) => {
-  const markets = events.flatMap(({marketPages = []}) => marketPages);
+  const markets = events.filter(event => !oddsSuspended(event)).flatMap(({marketPages = []}) => marketPages);
   const getSelections = (codes, predicate = () => true) => {
     const selections = new Map();
     codes.forEach((code) => {
       markets
         .filter((market) => market.code === code)
         .flatMap(({selections: marketSelections}) => marketSelections)
+        .filter(selection => validOdd(selection.odd))
         .filter(predicate)
         .sort((a, b) => selectionSortValue(code, a.label) - selectionSortValue(code, b.label))
         .forEach((selection) => {
@@ -394,6 +402,8 @@ export const buildMarketTabs = (events) => {
       availableCount = available.length;
     } else if (tab.code === 'OU') {
       selections = getSelections(['OU'], isAdditionalOverUnderSelection);
+      if (!selections.length) selections = getSelections(['OU'], ({label, line}) =>
+        (line ?? getLineFromOption(label)) === 2.5);
       availableCount = selections.length;
     } else {
       selections = getSelections([tab.code]);
@@ -419,7 +429,7 @@ const getDisplaySelections = (match, tab) => {
   });
 };
 
-const getLeagueName = (league) => league?.name ?? 'Virtual League';
+export const getLeagueName = (league) => ({ '21': 'Champions', '78': 'EPL' })[String(league?.leagueId ?? league?.id)] ?? league?.name ?? 'Virtual League';
 
 const getLeagueCode = (league, meta) => {
   const leagueNumber = meta?.leagueNumber || meta?.leagueId || league?.leagueNumber || league?.id;
@@ -427,27 +437,6 @@ const getLeagueCode = (league, meta) => {
 };
 
 const getWeekCode = (meta) => `WEEK ${meta?.weekNumber || 1}`;
-
-const getLeagueProvider = (league) => league?.provider ?? PROVIDER;
-
-const isAllValue = (value) => String(value ?? '').toLowerCase() === 'all';
-
-const getLeagueRequestId = (league) => {
-  const leagueId = league?.leagueId ?? league?.id ?? league?.leagueNumber;
-  return !leagueId || isAllValue(leagueId) ? DEFAULT_LEAGUE_ID : leagueId;
-};
-
-const getLeagueRequestProvider = (league) => {
-  const provider = getLeagueProvider(league);
-  return !provider || isAllValue(provider) ? PROVIDER : provider;
-};
-
-const getDefaultLeague = (leagues) => (
-  leagues.find((league) => (
-    normalizeProviderToken(getLeagueRequestProvider(league)) === normalizeProviderToken(PROVIDER) &&
-    String(getLeagueRequestId(league)) === String(DEFAULT_LEAGUE_ID)
-  )) ?? leagues.find((league) => !isAllValue(league.provider) && !isAllValue(league.id)) ?? leagues[0] ?? null
-);
 
 const formatClockTime = (date) =>
   date
@@ -552,6 +541,7 @@ const getPayloadCountdownTarget = (payload) => {
 
   const target =
     payload.nextRefreshAt ??
+    payload.boardEndAt ??
     payload.nextAt ??
     payload.NextAt ??
     payload.nextStartAt ??
@@ -572,12 +562,6 @@ const getPayloadCountdownTarget = (payload) => {
     getPayloadCountdownTarget(payload.display) ??
     getPayloadCountdownTarget(payload.data)
   );
-};
-
-const getSecondsRemaining = (target) => {
-  const targetDate = toDate(target);
-  if (!targetDate) return null;
-  return Math.max(0, Math.floor((targetDate.getTime() - Date.now()) / 1000));
 };
 
 const getLineFromOption = (option) => {
@@ -995,6 +979,12 @@ const styles = `
     white-space: nowrap;
   }
 
+  .timer-time.live-time {
+    font-family: "Segoe UI", Arial, sans-serif;
+    font-size: 15px;
+    letter-spacing: 0;
+  }
+
   .markets {
     min-width: 0;
     align-self: end;
@@ -1009,9 +999,7 @@ const styles = `
     width: 100%;
     margin-top: 0;
     border-top: 1px solid #000;
-    overflow-x: auto;
-    overflow-y: hidden;
-    scrollbar-width: thin;
+    overflow: visible;
   }
 
   .market-tab {
@@ -1026,9 +1014,9 @@ const styles = `
     font-size: 17px;
     font-weight: 800;
     padding: 0 4px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    white-space: normal;
+    line-height: 1.15;
+    text-align: center;
     cursor: pointer;
   }
 
@@ -1699,7 +1687,7 @@ const styles = `
     height: 100vh;
     min-height: 620px;
     display: grid;
-    grid-template-rows: 62px minmax(0, 1fr) 42px;
+    grid-template-rows: 62px 34px minmax(0, 1fr) 42px;
     background: radial-gradient(circle at 58% 25%, #242424 0, #151515 48%, #090909 100%);
   }
 
@@ -1715,6 +1703,12 @@ const styles = `
   }
 
   .competition-tabs { justify-content: center; }
+  .week-navigation { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) var(--receipt-panel-width); background: #111; }
+  .week-tabs { min-width: 0; display: flex; align-items: stretch; gap: 4px; margin: 0 14px; overflow-x: auto; scrollbar-width: thin; }
+  .week-tab { flex: 0 0 auto; min-width: 92px; padding: 3px 14px; border: 1px solid #303030; border-bottom: 2px solid #b70000; color: #fff; background: linear-gradient(#292929, #1c1c1c); font: 700 13px Arial, sans-serif; white-space: nowrap; cursor: pointer; }
+  .week-tab.active { background: linear-gradient(#dc0808, #a90000); border-color: #e00000; }
+  .week-tab:focus-visible { outline: 2px solid white; outline-offset: -3px; }
+  .league-week { grid-column: 2; margin-top: 3px; font: 700 12px Arial, sans-serif; }
   .competition-tab { width: clamp(76px, 9vw, 118px); padding: 4px 8px; border: 0; border-bottom: 3px solid transparent; color: #ddd; }
   .competition-tab.active { color: #fff; background: transparent; border-bottom-color: #e00000; }
   .competition-tab svg { font-size: 22px; filter: none; color: #f00000; }
@@ -1726,9 +1720,10 @@ const styles = `
     display: grid;
     grid-template-columns: minmax(0, 1fr) var(--receipt-panel-width);
   }
-  .odds-area { height: 100%; display: grid; grid-template-rows: 145px minmax(0, 1fr); padding: 8px 14px 10px; box-sizing: border-box; }
+  /* Only the summary and fixture list participate in these two rows. */
+  .odds-area { height: 100%; min-height: 0; display: grid; grid-template-rows: 145px minmax(0, 1fr); padding: 8px 14px 10px; box-sizing: border-box; }
   .market-layout { grid-template-columns: var(--pre-odds-width) minmax(0, 1fr); gap: 20px; min-height: 0; }
-  .league-panel { height: 145px; grid-template-columns: minmax(190px, 1fr) 155px; border: 1px solid #252525; background: repeating-linear-gradient(30deg, #1c1c1c 0 3px, #171717 3px 7px); }
+  .league-panel { height: 145px; box-sizing: border-box; grid-template-columns: minmax(0, 1fr) 142px; border: 1px solid #252525; background: repeating-linear-gradient(30deg, #1c1c1c 0 3px, #171717 3px 7px); }
   .league-brand { grid-template-columns: 58px 1fr; column-gap: 8px; padding: 8px 12px; }
   .league-brand:before { display: none; }
   .lion-mark { grid-row: 1 / span 2; width: 48px; height: 52px; margin: 0; font-size: 27px; }
@@ -1737,13 +1732,13 @@ const styles = `
   .timer-column { justify-items: center; padding: 0 8px; }
   .timer-dial { width: 82px; height: 82px; border-width: 3px; background: #191919; }
   .timer-time { margin: 6px 0; font-size: 18px; }
-  .live-status { font-size: 8px; }
+  .live-status { font-size: 8px; white-space: normal; }
 
   .markets { height: 145px; align-content: end; }
-  .market-tabs { gap: 4px; border: 0; }
-  .market-tab { height: 36px; border: 1px solid #303030; border-bottom: 2px solid #b70000; background: linear-gradient(#292929, #1c1c1c); font-size: clamp(11px, 1.1vw, 16px); }
+  .market-tabs { gap: 4px; border: 0; grid-template-columns: .55fr repeat(5, minmax(0, 1fr)); }
+  .market-tab { height: 40px; min-height: calc(2.3em + 10px); border: 1px solid #303030; border-bottom: 2px solid #b70000; background: linear-gradient(#292929, #1c1c1c); font-size: clamp(11px, 1.1vw, 16px); }
   .market-tab.active { background: linear-gradient(#dc0808, #a90000); }
-  .market-labels { gap: 4px; padding: 6px 0 0; }
+  .market-labels { gap: var(--odds-gap); padding: 6px 8px 0 0; }
   .market-label { min-width: 0; height: 35px; border: 1px solid #ef1e1e; background: linear-gradient(#d60a0a, #a90000); font-size: clamp(14px, 1.4vw, 20px); }
 
   .match-list { min-height: 0; grid-template-rows: repeat(10, minmax(0, 1fr)); gap: 1px; background: #080808; }
@@ -1751,7 +1746,8 @@ const styles = `
   .match-row:nth-child(odd) {
     height: auto;
     min-height: 0;
-    grid-template-columns: 38px 54px minmax(54px, 74px) 30px 54px minmax(54px, 74px) 34px minmax(0, 1fr);
+    /* Fixed cells total 210px; team cells fill the panel width plus its 20px gap. */
+    grid-template-columns: 38px 54px minmax(0, calc((var(--pre-odds-width) - 202px) / 2)) 42px minmax(0, calc((var(--pre-odds-width) - 202px) / 2)) 54px 34px minmax(0, 1fr);
     border: 0;
     background: linear-gradient(100deg, #292929, #1c1c1c);
     color: #f3f3f3;
@@ -1902,7 +1898,7 @@ const styles = `
   @media (max-height: 820px) {
     .betting-board {
       min-height: 0;
-      grid-template-rows: 58px minmax(0, 1fr) 40px;
+      grid-template-rows: 58px 34px minmax(0, 1fr) 40px;
     }
     .terminal-topbar { height: 58px; }
     .header-brand img { max-height: 50px; }
@@ -1913,7 +1909,7 @@ const styles = `
     }
     .league-panel {
       height: 124px;
-      grid-template-columns: minmax(180px, 1fr) 142px;
+      grid-template-columns: minmax(0, 1fr) 142px;
     }
     .markets { height: 124px; }
     .market-tab { height: 31px; }
@@ -2033,12 +2029,10 @@ export const TerminalHeaderActions = ({
 );
 
 const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
-  const [leagues, setLeagues] = useState([]);
-  const [selectedLeague, setSelectedLeague] = useState(null);
-  const [display, setDisplay] = useState(EMPTY_DISPLAY);
-  const [loadingLeagues, setLoadingLeagues] = useState(true);
-  const [loadingDisplay, setLoadingDisplay] = useState(false);
-  const [error, setError] = useState('');
+  const feed = useLeagueFeed();
+  const leagues = LEAGUES;
+  const selectedLeague = leagues.find(({id}) => id === feed.leagueId);
+  const error = feed.error;
   const [slip, setSlip] = useState([]);
   const [activeMarketCode, setActiveMarketCode] = useState('MAIN');
   const [stake, setStake] = useState(DEFAULT_STAKE);
@@ -2051,22 +2045,29 @@ const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
   const [cancelTicketNumber, setCancelTicketNumber] = useState('');
   const [moreMarketsMatch, setMoreMarketsMatch] = useState(null);
   const [tableTheme, setTableTheme] = useState(() => localStorage.getItem('virtualDisplayTableTheme') || 'dark');
-  const [displayCountdown, setDisplayCountdown] = useState('--:--');
-  const [countdownSeconds, setCountdownSeconds] = useState(null);
   const [currentTime, setCurrentTime] = useState(() => Date.now());
-  const [socketDebug, setSocketDebug] = useState({
-    connected: false,
-    lastEvent: '',
-    providerEventId: '',
-    eventCount: 0,
-  });
-  const displayRequestSequenceRef = useRef(0);
-  const initialRestLoggedRef = useRef(false);
-  const firstSocketLoggedRef = useRef(false);
   const autoPrintedTicketKeysRef = useRef(new Set());
-  const selectedLeagueId = selectedLeague ? getLeagueRequestId(selectedLeague) : DEFAULT_LEAGUE_ID;
-  const selectedLeagueProvider = selectedLeague ? getLeagueRequestProvider(selectedLeague) : PROVIDER;
-  const selectedLeagueNumber = selectedLeague?.leagueNumber;
+  const socketDebug = {
+    connected: feed.connected, lastEvent: '', providerEventId: feed.board?.providerEventId,
+    eventCount: feed.board?.events?.length || 0,
+  };
+  const switchLeague = league => {
+    if (league.id === feed.leagueId || ticketSubmitting) return;
+    if (slip.length) setTicketStatus({type: 'info', message: 'Bet slip cleared when switching leagues.'});
+    setSlip([]);
+    setStake(DEFAULT_STAKE);
+    setMoreMarketsMatch(null);
+    feed.selectLeague(league.id);
+  };
+  const switchWeek = board => {
+    const key = weekKey(board);
+    if (key === feed.selectedWeekKey || ticketSubmitting) return;
+    if (slip.length) setTicketStatus({type: 'info', message: 'Bet slip cleared when switching weeks.'});
+    setSlip([]);
+    setStake(DEFAULT_STAKE);
+    setMoreMarketsMatch(null);
+    feed.selectWeek(key);
+  };
 
   const toggleTableTheme = () => {
     setTableTheme((current) => {
@@ -2198,6 +2199,15 @@ const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
 
     return {
       provider: displayPayload?.provider,
+      state: displayPayload?.state,
+      bettingAllowed: displayPayload?.bettingAllowed,
+      BettingOpen: displayPayload?.BettingOpen ?? displayPayload?.bettingOpen,
+      serverClockOffsetMs: displayPayload?.serverClockOffsetMs,
+      scheduledStartAtUtc: displayPayload?.scheduledStartAtUtc,
+      startedAtUtc: displayPayload?.startedAtUtc,
+      minute: displayPayload?.minute,
+      available: displayPayload?.available,
+      suspended: displayPayload?.suspended,
       leagueId: displayPayload?.leagueId,
       leagueNumber: displayPayload?.leagueNumber,
       weekNumber: displayPayload?.weekNumber,
@@ -2216,651 +2226,27 @@ const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
     };
   }, [getBoardTimingPayload, getDisplayPayloadFromSocketPayload]);
 
-  const getUsableEventsFromPayload = useCallback((payload) => {
-    const displayPayload = getDisplayPayloadFromSocketPayload(payload);
-    return Array.isArray(displayPayload?.events) ? displayPayload.events : [];
-  }, [getDisplayPayloadFromSocketPayload]);
+  const display = useMemo(() => feed.board ? normalizeDisplayPayload(feed.board) : EMPTY_DISPLAY,
+    [feed.board, normalizeDisplayPayload]);
 
-  const getSocketPayloadProviderEventId = useCallback((payload) => {
-    const displayPayload = getDisplayPayloadFromSocketPayload(payload);
-    const events = Array.isArray(displayPayload?.events) ? displayPayload.events : [];
-    const firstEvent = events.find((event) => event && typeof event === 'object') ?? null;
-    return displayPayload?.providerEventId ?? firstEvent?.providerEventId ?? firstEvent?.eventId ?? '';
-  }, [getDisplayPayloadFromSocketPayload]);
-
-  const getDisplayFeedSummary = useCallback((payload) => {
-    const displayPayload = getDisplayPayloadFromSocketPayload(payload);
-    const timingPayload = getBoardTimingPayload(payload, displayPayload);
-    const events = Array.isArray(displayPayload?.events) ? displayPayload.events : [];
-    const firstEvent = events.find((event) => event && typeof event === 'object') ?? null;
-
-    return {
-      providerEventId: displayPayload?.providerEventId ?? timingPayload?.providerEventId ?? firstEvent?.providerEventId ?? firstEvent?.eventId ?? '',
-      isStale: displayPayload?.isStale ?? timingPayload?.isStale,
-      eventCount: events.length,
-      lastUpdatedAt: getPayloadUpdatedAt(timingPayload) ?? getPayloadUpdatedAt(displayPayload) ?? '',
-      startTime: getPayloadStartTime(timingPayload) ?? getPayloadStartTime(displayPayload) ?? '',
-      countdownTarget: getPayloadCountdownTarget(timingPayload) ?? getPayloadCountdownTarget(displayPayload) ?? '',
-    };
-  }, [getBoardTimingPayload, getDisplayPayloadFromSocketPayload]);
-
-  const logDisplayFeedUpdate = useCallback((source, stage, summary, extra = {}) => {
-    console.log('[virtual-display-feed]', {
-      source,
-      stage,
-      providerEventId: summary?.providerEventId ?? '',
-      isStale: summary?.isStale,
-      eventCount: summary?.eventCount ?? 0,
-      lastUpdatedAt: summary?.lastUpdatedAt ?? '',
-      startTime: summary?.startTime ?? '',
-      countdownTarget: summary?.countdownTarget ?? '',
-      ...extra,
-    });
-  }, []);
-
-  const applyDisplayPayload = useCallback((payload, source) => {
-    const nextDisplay = normalizeDisplayPayload(payload);
-    const nextEvents = nextDisplay.events;
-    const incomingSummary = getDisplayFeedSummary(payload);
-    const payloadProvider = normalizeProviderToken(nextDisplay.provider);
-    const selectedProvider = normalizeProviderToken(selectedLeagueProvider);
-    const payloadLeagueIds = [nextDisplay.leagueId, nextDisplay.leagueNumber]
-      .filter((value) => value !== undefined && value !== null && value !== '')
-      .map(String);
-    const selectedLeagueIds = [
-      selectedLeagueId,
-      selectedLeagueNumber,
-    ]
-      .filter((value) => value !== undefined && value !== null && value !== '')
-      .map(String);
-    const providerMismatch = payloadProvider && selectedProvider && payloadProvider !== selectedProvider;
-    const leagueMismatch = payloadLeagueIds.length > 0 &&
-      !payloadLeagueIds.some((payloadId) => selectedLeagueIds.includes(payloadId));
-
-    if (providerMismatch || leagueMismatch) {
-      logDisplayFeedUpdate(source, 'ignored-wrong-feed', incomingSummary, {
-        selectedLeagueId,
-        selectedLeagueProvider,
-      });
-      return [];
-    }
-    const firstOdds = normalizeEventMarkets(nextEvents[0] ?? {})
-      .find(({code}) => code === '1X2')
-      ?.selections.map(({odd}) => formatOdd(odd)) ?? [];
-    const timerTarget = nextDisplay.activeNextRefreshAt || nextDisplay.activeEndAt;
-    const timerSeconds = getSecondsRemaining(timerTarget);
-    const payloadRemainingSeconds = Number(
-      payload?.remainingSeconds ??
-      payload?.currentBoard?.remainingSeconds ??
-      payload?.display?.remainingSeconds ??
-      payload?.data?.remainingSeconds
-    );
-    const timingLog = {
-      providerEventId: nextDisplay.activeProviderEventId ?? nextDisplay.providerEventId ?? '',
-      remainingSeconds: Number.isFinite(payloadRemainingSeconds)
-        ? payloadRemainingSeconds
-        : timerSeconds,
-      deadline: timerTarget ?? null,
-      now: Date.now(),
-    };
-    if (source === 'rest-initial' && !initialRestLoggedRef.current) {
-      initialRestLoggedRef.current = true;
-      console.log('INITIAL REST:', timingLog);
-    }
-    if (source === 'socket' && !firstSocketLoggedRef.current) {
-      firstSocketLoggedRef.current = true;
-      console.log('FIRST SOCKET:', timingLog);
-    }
-    const firstRow = nextEvents[0]
-      ? `${nextEvents[0].homeTeam ?? nextEvents[0].home ?? ''} vs ${nextEvents[0].awayTeam ?? nextEvents[0].away ?? ''}`
-      : '';
-    logDisplayFeedUpdate(source, 'received', incomingSummary, {
-      normalizedEventCount: nextEvents.length,
-    });
-    setSocketDebug((currentDebug) => {
-      if (nextEvents.length > 0) {
-        return {
-          ...currentDebug,
-          lastEvent: source,
-          providerEventId: incomingSummary.providerEventId || currentDebug.providerEventId,
-          eventCount: nextEvents.length,
-        };
-      }
-
-      return currentDebug.eventCount > 0
-        ? currentDebug
-        : {
-            ...currentDebug,
-            lastEvent: source || currentDebug.lastEvent,
-            providerEventId: incomingSummary.providerEventId || currentDebug.providerEventId,
-            eventCount: incomingSummary.eventCount || currentDebug.eventCount,
-          };
-    });
-    console.log(
-      `GRID TIMER SET providerEventId=${nextDisplay.activeProviderEventId ?? nextDisplay.providerEventId ?? ''} ` +
-      `target=${timerTarget ?? ''} seconds=${timerSeconds ?? ''}`
-    );
-    console.log(
-      `GRID ODDS CHECK firstMatch=${firstRow} main1=${firstOdds[0] ?? '-'} ` +
-      `x=${firstOdds[1] ?? '-'} two=${firstOdds[2] ?? '-'}`
-    );
-
-    setDisplay((currentDisplay) => {
-      const cachedEvents = Array.isArray(currentDisplay.events) ? currentDisplay.events : [];
-      const hasIncomingEvents = nextEvents.length > 0;
-      const hasCachedEvents = cachedEvents.length > 0;
-      const incomingHasOdds = nextEvents.some(({marketPages = []}) =>
-        marketPages.some(({selections = []}) => selections.length > 0));
-      const cachedHasOdds = cachedEvents.some(({marketPages = []}) =>
-        marketPages.some(({selections = []}) => selections.length > 0));
-      const incomingUpdatedAt = toDate(nextDisplay.lastUpdatedAt);
-      const currentUpdatedAt = toDate(currentDisplay.lastUpdatedAt);
-      const isOlderPayload = !!incomingUpdatedAt && !!currentUpdatedAt &&
-        incomingUpdatedAt.getTime() < currentUpdatedAt.getTime();
-      const isExplicitlyStale = nextDisplay.isStale === true;
-      const shouldClear = isExplicitlyStale && !hasIncomingEvents && !hasCachedEvents;
-      const shouldPreserveCachedEvents = !hasIncomingEvents && hasCachedEvents && !shouldClear;
-      const currentSummary = {
-        providerEventId: currentDisplay.providerEventId ?? currentDisplay.activeProviderEventId ?? '',
-        isStale: currentDisplay.isStale,
-        eventCount: cachedEvents.length,
-        lastUpdatedAt: currentDisplay.lastUpdatedAt ?? '',
-      };
-
-      logDisplayFeedUpdate(source, 'before-set', currentSummary);
-
-      if (isOlderPayload) {
-        logDisplayFeedUpdate(source, 'ignored-older-payload', incomingSummary);
-        return currentDisplay;
-      }
-
-      const deadlineDecision = reconcileCountdownDeadline({
-        currentProviderEventId: currentDisplay.activeProviderEventId ?? currentDisplay.providerEventId,
-        currentDeadline: currentDisplay.activeNextRefreshAt ?? currentDisplay.activeEndAt,
-        incomingProviderEventId: nextDisplay.activeProviderEventId ?? nextDisplay.providerEventId,
-        incomingDeadline: nextDisplay.activeNextRefreshAt ?? nextDisplay.activeEndAt,
-      });
-      console.log('COUNTDOWN RESET:', {
-        oldDeadline: currentDisplay.activeNextRefreshAt ?? currentDisplay.activeEndAt ?? null,
-        newDeadline: deadlineDecision.deadline,
-        reason: deadlineDecision.reason,
-        reset: deadlineDecision.reset,
-      });
-      const reconciledNextDisplay = {
-        ...nextDisplay,
-        activeNextRefreshAt: deadlineDecision.deadline,
-      };
-
-      if (hasIncomingEvents && !incomingHasOdds && cachedHasOdds) {
-        logDisplayFeedUpdate(source, 'preserve-cache-after-oddsless-payload', incomingSummary);
-        return {
-          ...currentDisplay,
-          activeNextRefreshAt: deadlineDecision.deadline,
-          activeEndAt: reconciledNextDisplay.activeEndAt ?? currentDisplay.activeEndAt,
-          lastUpdatedAt: reconciledNextDisplay.lastUpdatedAt ?? currentDisplay.lastUpdatedAt,
-        };
-      }
-
-      if (hasIncomingEvents || shouldClear) {
-        const appliedDisplay = {
-          ...reconciledNextDisplay,
-          activeStartAt: reconciledNextDisplay.activeStartAt ?? currentDisplay.activeStartAt,
-          isStale: hasIncomingEvents ? false : reconciledNextDisplay.isStale,
-        };
-
-        logDisplayFeedUpdate(source, 'applied', {
-          providerEventId: appliedDisplay.providerEventId ?? appliedDisplay.activeProviderEventId ?? '',
-          isStale: appliedDisplay.isStale,
-          eventCount: appliedDisplay.events.length,
-          lastUpdatedAt: appliedDisplay.lastUpdatedAt ?? '',
-        }, {
-          action: hasIncomingEvents ? 'replace-with-events' : 'clear-explicit-stale-empty',
-        });
-
-        return appliedDisplay;
-      }
-
-      if (shouldPreserveCachedEvents) {
-        const preservedDisplay = {
-          ...currentDisplay,
-          provider: nextDisplay.provider ?? currentDisplay.provider,
-          leagueId: nextDisplay.leagueId ?? currentDisplay.leagueId,
-          leagueNumber: nextDisplay.leagueNumber ?? currentDisplay.leagueNumber,
-          weekNumber: nextDisplay.weekNumber ?? currentDisplay.weekNumber,
-          providerEventId: nextDisplay.providerEventId ?? currentDisplay.providerEventId,
-          firstMatch: nextDisplay.firstMatch ?? currentDisplay.firstMatch,
-          leagueName: nextDisplay.leagueName ?? currentDisplay.leagueName,
-          activeProviderEventId: nextDisplay.activeProviderEventId ?? currentDisplay.activeProviderEventId,
-          activeWeekNumber: nextDisplay.activeWeekNumber ?? currentDisplay.activeWeekNumber,
-          activeNextRefreshAt: deadlineDecision.deadline,
-          activeEndAt: reconciledNextDisplay.activeEndAt ?? currentDisplay.activeEndAt,
-          activeStartAt: nextDisplay.activeStartAt ?? currentDisplay.activeStartAt,
-          lastUpdatedAt: nextDisplay.lastUpdatedAt ?? currentDisplay.lastUpdatedAt,
-          isStale: false,
-        };
-
-        logDisplayFeedUpdate(source, 'applied', {
-          providerEventId: preservedDisplay.providerEventId ?? preservedDisplay.activeProviderEventId ?? '',
-          isStale: preservedDisplay.isStale,
-          eventCount: preservedDisplay.events.length,
-          lastUpdatedAt: preservedDisplay.lastUpdatedAt ?? '',
-        }, {
-          action: isExplicitlyStale ? 'preserve-cached-events-despite-stale-empty' : 'preserve-cached-events-empty-payload',
-        });
-
-        return preservedDisplay;
-      }
-
-      logDisplayFeedUpdate(source, 'applied', {
-        providerEventId: currentDisplay.providerEventId ?? currentDisplay.activeProviderEventId ?? '',
-        isStale: currentDisplay.isStale,
-        eventCount: cachedEvents.length,
-        lastUpdatedAt: currentDisplay.lastUpdatedAt ?? '',
-      }, {
-        action: 'ignore-empty-no-cache',
-      });
-
-      return currentDisplay;
-    });
-
-    console.log(
-      `GRID SET EVENTS providerEventId=${nextDisplay.providerEventId ?? ''} ` +
-      `eventCount=${nextDisplay.events.length}`
-    );
-    console.log(
-      `[display-state-set] providerEventId=${nextDisplay.providerEventId ?? ''} ` +
-      `week=${nextDisplay.weekNumber ?? ''} firstMatch=${nextDisplay.firstMatch ?? ''} firstRow=${firstRow}`
-    );
-
-    return nextEvents;
-  }, [
-    getDisplayFeedSummary,
-    logDisplayFeedUpdate,
-    normalizeDisplayPayload,
-    selectedLeagueId,
-    selectedLeagueNumber,
-    selectedLeagueProvider,
-  ]);
-
-  const upsertLeagueFromDisplayPayload = useCallback((payload) => {
-    const displayPayload = getDisplayPayloadFromSocketPayload(payload);
-    if (!displayPayload?.provider && !displayPayload?.leagueId && !displayPayload?.leagueNumber) return;
-
-    const displayLeague = normalizeLeague({
-      provider: displayPayload.provider || PROVIDER,
-      leagueId: displayPayload.leagueId || displayPayload.leagueNumber,
-      leagueNumber: displayPayload.leagueNumber,
-      weekNumber: displayPayload.weekNumber,
-      providerEventId: displayPayload.providerEventId,
-      firstMatch: displayPayload.firstMatch,
-      leagueName: displayPayload.leagueName,
-    });
-
-    setLeagues((currentLeagues) => {
-      const existingIndex = currentLeagues.findIndex((league) => {
-        const currentIds = [league.id, league.leagueId, league.leagueNumber].filter((value) => value !== undefined && value !== null);
-        const incomingIds = [displayLeague.id, displayLeague.leagueId, displayLeague.leagueNumber].filter((value) => value !== undefined && value !== null);
-
-        return normalizeProviderToken(league.provider) === normalizeProviderToken(displayLeague.provider) &&
-          incomingIds.some((incomingId) => currentIds.some((currentId) => String(incomingId) === String(currentId)));
-      });
-
-      if (existingIndex === -1) return [...currentLeagues, displayLeague];
-
-      return currentLeagues.map((league, index) => (
-        index === existingIndex ? {...league, ...displayLeague} : league
-      ));
-    });
-
-    setSelectedLeague((currentLeague) => {
-      if (
-        currentLeague &&
-        String(currentLeague.id) === String(displayLeague.id) &&
-        String(currentLeague.leagueNumber ?? '') === String(displayLeague.leagueNumber ?? '') &&
-        String(currentLeague.weekNumber ?? '') === String(displayLeague.weekNumber ?? '') &&
-        String(currentLeague.providerEventId ?? '') === String(displayLeague.providerEventId ?? '') &&
-        String(currentLeague.firstMatch ?? '') === String(displayLeague.firstMatch ?? '')
-      ) {
-        return currentLeague;
-      }
-
-      return displayLeague;
-    });
-  }, [getDisplayPayloadFromSocketPayload]);
+  const countdownDeadline = Number.isFinite(boardDeadline(display)) ? new Date(boardDeadline(display)) : null;
+  const countdownSeconds = countdownDeadline
+    ? Math.max(0, Math.ceil((countdownDeadline.getTime() - boardNow(display)) / 1000)) : null;
+  const lifecycleState = boardState(display);
+  const displayCountdown = lifecycleState === 'FINISHED' ? 'FT' : lifecycleState === 'LIVE'
+    ? `LIVE${display.minute != null ? ` ${display.minute}'` : ''}`
+    : countdownSeconds === null ? '--:--' : formatCountdown(countdownSeconds);
 
   useEffect(() => {
-    let cancelled = false;
-
-    const loadLeagues = async () => {
-      setLoadingLeagues(true);
-      setError('');
-
-      try {
-        const payload = await getLeagues();
-        if (cancelled) return;
-
-        const nextLeagues = getArrayFromPayload(payload, ['leagues', 'items', 'results'])
-          .map(normalizeLeague)
-          .filter(({id}) => id !== undefined && id !== null);
-
-        setLeagues(nextLeagues);
-        setSelectedLeague(getDefaultLeague(nextLeagues));
-      } catch (err) {
-        if (cancelled) return;
-
-        const message = err instanceof TypeError
-          ? `Virtual-Api request failed: ${err.message}. If the browser console shows a CORS policy error, the API must allow http://localhost:3000.`
-          : err.message;
-        console.error('Virtual-Api leagues error:', err);
-        setError(message);
-        setLeagues([]);
-        setSelectedLeague(null);
-      } finally {
-        if (!cancelled) setLoadingLeagues(false);
-      }
-    };
-
-    loadLeagues();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!selectedLeagueId || !selectedLeagueProvider) {
-      logDisplayFeedUpdate('rest-initial', 'clear-no-selected-league', {
-        providerEventId: '',
-        isStale: true,
-        eventCount: 0,
-        lastUpdatedAt: '',
-      });
-      setDisplay(EMPTY_DISPLAY);
-      return;
-    }
-
-    let cancelled = false;
-
-    const loadDisplay = async () => {
-      const requestSequence = ++displayRequestSequenceRef.current;
-      setLoadingDisplay(true);
-      setError('');
+    if (slip.some(pick => pick.boardIdentity !== `${feed.leagueId}:${display.providerEventId || ''}`)) {
       setSlip([]);
-
-      try {
-        const payload = await getDisplay(selectedLeagueProvider, selectedLeagueId);
-        if (cancelled || requestSequence !== displayRequestSequenceRef.current) return;
-
-        const nextEvents = applyDisplayPayload(payload, 'rest-initial');
-        console.log(`Loaded ${nextEvents.length} events for league ${selectedLeagueId}`);
-        console.log('REST FIRST EVENT RAW =', JSON.stringify(payload?.events?.[0], null, 2));
-        console.log('REST FIRST EVENT SHAPE', {
-          hasMarketsArray: Array.isArray(payload?.events?.[0]?.markets),
-          hasSelectionsArray: Array.isArray(payload?.events?.[0]?.markets?.[0]?.selections),
-          marketCount: Array.isArray(payload?.events?.[0]?.markets) ? payload.events[0].markets.length : 0,
-        });
-        console.log('First event display markets:', normalizeEvent(nextEvents[0] ?? {})?.markets ?? {});
-      } catch (err) {
-        if (cancelled) return;
-
-        const message = err instanceof TypeError
-          ? `Virtual-Api request failed: ${err.message}. If the browser console shows a CORS policy error, the API must allow http://localhost:3000.`
-          : err.message;
-        console.error('Virtual-Api display error:', err);
-        setError(message);
-        setDisplay((currentDisplay) => {
-          const cachedEvents = Array.isArray(currentDisplay.events) ? currentDisplay.events : [];
-
-          if (cachedEvents.length > 0) {
-            logDisplayFeedUpdate('rest-initial', 'preserve-cache-after-error', {
-              providerEventId: currentDisplay.providerEventId ?? currentDisplay.activeProviderEventId ?? '',
-              isStale: currentDisplay.isStale,
-              eventCount: cachedEvents.length,
-              lastUpdatedAt: currentDisplay.lastUpdatedAt ?? '',
-            });
-            return currentDisplay;
-          }
-
-          logDisplayFeedUpdate('rest-initial', 'clear-after-error-no-cache', {
-            providerEventId: '',
-            isStale: true,
-            eventCount: 0,
-            lastUpdatedAt: '',
-          });
-          return EMPTY_DISPLAY;
-        });
-      } finally {
-        if (!cancelled) setLoadingDisplay(false);
-      }
-    };
-
-    loadDisplay();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [applyDisplayPayload, logDisplayFeedUpdate, selectedLeagueId, selectedLeagueProvider]);
+      setTicketStatus({type: 'info', message: 'Bet slip cleared because the event changed.'});
+    }
+  }, [feed.leagueId, display.providerEventId, slip]);
 
   useEffect(() => {
-    const socket = connectSocket();
-    const markSocketConnected = () => {
-      setSocketDebug((currentDebug) => ({
-        ...currentDebug,
-        connected: true,
-      }));
-    };
-    const markSocketDisconnected = () => {
-      setSocketDebug((currentDebug) => ({
-        ...currentDebug,
-        connected: false,
-      }));
-    };
-    const hydrateCurrentDisplay = async () => {
-      if (!selectedLeagueId || !selectedLeagueProvider) return;
-      const requestSequence = ++displayRequestSequenceRef.current;
-
-      try {
-        const payload = await getDisplay(selectedLeagueProvider, selectedLeagueId);
-        if (requestSequence !== displayRequestSequenceRef.current) return;
-        const nextEvents = applyDisplayPayload(payload, 'rest-reconnect');
-        if (nextEvents.length > 0) upsertLeagueFromDisplayPayload(payload);
-        setError('');
-      } catch (err) {
-        console.error('Virtual-Api reconnect display hydrate error:', err);
-      }
-    };
-
-    const onAnySocketEvent = (eventName, payload) => {
-      if (![VIRTUAL_DISPLAY_UPDATED_EVENT, VIRTUAL_EVENTS_QUEUE_UPDATED_EVENT].includes(eventName)) return;
-      if (!payload) return;
-
-      const usableEvents = getUsableEventsFromPayload(payload);
-      const payloadSummary = getDisplayFeedSummary(payload);
-      console.log('SOCKET ANY', eventName, {
-        providerEventId: payloadSummary.providerEventId,
-        isStale: payloadSummary.isStale,
-        eventCount: payloadSummary.eventCount,
-        lastUpdatedAt: payloadSummary.lastUpdatedAt,
-        keys: Object.keys(payload || {})
-      });
-      setSocketDebug((currentDebug) => {
-        if (usableEvents.length === 0 && currentDebug.eventCount > 0) {
-          return {
-            ...currentDebug,
-            connected: socket.connected,
-            lastEvent: eventName || currentDebug.lastEvent,
-            providerEventId: payloadSummary.providerEventId || currentDebug.providerEventId,
-          };
-        }
-
-        return {
-          connected: socket.connected,
-          lastEvent: eventName,
-          providerEventId: getSocketPayloadProviderEventId(payload) || payloadSummary.providerEventId || currentDebug.providerEventId,
-          eventCount: usableEvents.length || currentDebug.eventCount,
-        };
-      });
-
-      if (eventName === VIRTUAL_DISPLAY_UPDATED_EVENT) {
-        console.log('SOCKET FULL PAYLOAD virtual-display-updated', payload);
-      }
-
-      if (usableEvents.length === 0) {
-        const displayPayload = getDisplayPayloadFromSocketPayload(payload);
-        const timingPayload = getBoardTimingPayload(payload, displayPayload);
-        const timerTarget = getPayloadCountdownTarget(timingPayload) ?? getPayloadCountdownTarget(displayPayload);
-        const startTime = getPayloadStartTime(timingPayload) ?? getPayloadStartTime(displayPayload);
-        const incomingProviderEventId = timingPayload?.providerEventId ?? displayPayload?.providerEventId;
-
-        if (timerTarget || incomingProviderEventId) {
-          setDisplay((currentDisplay) => {
-            const incomingUpdatedAt = toDate(getPayloadUpdatedAt(timingPayload));
-            const currentUpdatedAt = toDate(currentDisplay.lastUpdatedAt);
-            if (incomingUpdatedAt && currentUpdatedAt &&
-              incomingUpdatedAt.getTime() < currentUpdatedAt.getTime()) {
-              return currentDisplay;
-            }
-
-            const deadlineDecision = reconcileCountdownDeadline({
-              currentProviderEventId: currentDisplay.activeProviderEventId ?? currentDisplay.providerEventId,
-              currentDeadline: currentDisplay.activeNextRefreshAt ?? currentDisplay.activeEndAt,
-              incomingProviderEventId,
-              incomingDeadline: timerTarget,
-            });
-            console.log('COUNTDOWN RESET:', {
-              oldDeadline: currentDisplay.activeNextRefreshAt ?? currentDisplay.activeEndAt ?? null,
-              newDeadline: deadlineDecision.deadline,
-              reason: deadlineDecision.reason,
-              reset: deadlineDecision.reset,
-            });
-
-            return {
-              ...currentDisplay,
-              activeProviderEventId: incomingProviderEventId ?? currentDisplay.activeProviderEventId,
-              activeWeekNumber: timingPayload?.weekNumber ?? currentDisplay.activeWeekNumber,
-              activeNextRefreshAt: deadlineDecision.deadline,
-              activeEndAt: timerTarget
-                ? timingPayload?.endAt ?? timingPayload?.endsAt ?? displayPayload?.endAt ?? null
-                : currentDisplay.activeEndAt,
-              activeStartAt: startTime ?? currentDisplay.activeStartAt,
-              lastUpdatedAt: getPayloadUpdatedAt(timingPayload) ?? currentDisplay.lastUpdatedAt,
-            };
-          });
-          logDisplayFeedUpdate('socket', 'applied-timing-only', payloadSummary);
-        }
-
-        return;
-      }
-
-      console.log('SOCKET FIRST EVENT RAW =', JSON.stringify(usableEvents[0], null, 2));
-      console.log('SOCKET FIRST EVENT SHAPE', {
-        hasMarketsArray: Array.isArray(usableEvents[0]?.markets),
-        hasSelectionsArray: Array.isArray(usableEvents[0]?.markets?.[0]?.selections),
-        marketCount: Array.isArray(usableEvents[0]?.markets) ? usableEvents[0].markets.length : 0,
-      });
-
-      const nextEvents = applyDisplayPayload(payload, 'socket');
-      const displayPayload = getDisplayPayloadFromSocketPayload(payload);
-      if (nextEvents.length === 0) return;
-
-      if (eventName === VIRTUAL_DISPLAY_UPDATED_EVENT) {
-        console.log(
-          `SOCKET EVENT virtual-display-updated providerEventId=${displayPayload?.providerEventId ?? ''} ` +
-          `eventCount=${nextEvents.length}`
-        );
-      }
-
-      if (eventName === VIRTUAL_EVENTS_QUEUE_UPDATED_EVENT) {
-        const current = displayPayload?.providerEventId
-          ?? displayPayload?.firstMatch
-          ?? payload.current
-          ?? '';
-        console.log(
-          `SOCKET EVENT virtual-events-queue-updated current=${current} eventCount=${nextEvents.length}`
-        );
-      }
-
-      upsertLeagueFromDisplayPayload(payload);
-      setError('');
-      setLoadingDisplay(false);
-    };
-
-    socket.on('connect', markSocketConnected);
-    socket.on('disconnect', markSocketDisconnected);
-    socket.on('connect_error', markSocketDisconnected);
-    socket.io.on('reconnect', hydrateCurrentDisplay);
-    socket.onAny(onAnySocketEvent);
-    if (socket.connected) {
-      markSocketConnected();
-    }
-
-    return () => {
-      socket.off('connect', markSocketConnected);
-      socket.off('disconnect', markSocketDisconnected);
-      socket.off('connect_error', markSocketDisconnected);
-      socket.io.off('reconnect', hydrateCurrentDisplay);
-      socket.offAny(onAnySocketEvent);
-    };
-  }, [
-    getDisplayPayloadFromSocketPayload,
-    getBoardTimingPayload,
-    getDisplayFeedSummary,
-    getSocketPayloadProviderEventId,
-    getUsableEventsFromPayload,
-    applyDisplayPayload,
-    logDisplayFeedUpdate,
-    selectedLeagueId,
-    selectedLeagueProvider,
-    upsertLeagueFromDisplayPayload,
-  ]);
-
-  useEffect(() => {
-    const target = display.activeNextRefreshAt || display.activeEndAt;
-    const targetDate = toDate(target);
-    const providerEventId = display.activeProviderEventId ?? display.providerEventId ?? '';
-
-    console.log(
-      `TIMER SOURCE providerEventId=${providerEventId} ` +
-      `target=${target ?? ''}`
-    );
-
-    if (!targetDate) {
-      setDisplayCountdown('--:--');
-      setCountdownSeconds(null);
-      console.log('[virtual-display-timer]', {
-        providerEventId,
-        countdownTarget: '',
-        now: new Date().toISOString(),
-        secondsRemaining: null,
-      });
-      return undefined;
-    }
-
-    const tick = () => {
-      const seconds = Math.max(0, Math.floor((targetDate.getTime() - Date.now()) / 1000));
-      const mmss = formatCountdown(seconds);
-      console.log('[virtual-display-timer]', {
-        providerEventId,
-        countdownTarget: target,
-        now: new Date().toISOString(),
-        secondsRemaining: seconds,
-      });
-      setDisplayCountdown(mmss);
-      setCountdownSeconds(seconds);
-    };
-
-    tick();
-    const intervalId = window.setInterval(tick, 1000);
-
-    return () => {
-      window.clearInterval(intervalId);
-    };
-  }, [
-    display.activeEndAt,
-    display.activeNextRefreshAt,
-    display.activeProviderEventId,
-    display.providerEventId,
-  ]);
+    setMoreMarketsMatch(null);
+  }, [feed.leagueId, display.providerEventId]);
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -2872,83 +2258,6 @@ const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
     };
   }, []);
 
-  useEffect(() => {
-    const intervalId = window.setInterval(() => {
-      if (!display.lastUpdatedAt) return;
-
-      const lastUpdatedAt = toDate(display.lastUpdatedAt);
-      if (!lastUpdatedAt) return;
-
-      if (Date.now() - lastUpdatedAt.getTime() >= STALE_AFTER_MS) {
-        setDisplay((currentDisplay) => {
-          const cachedEvents = Array.isArray(currentDisplay.events) ? currentDisplay.events : [];
-
-          if (cachedEvents.length > 0) {
-            logDisplayFeedUpdate('local-stale-check', 'preserve-visible-cached-events', {
-              providerEventId: currentDisplay.providerEventId ?? currentDisplay.activeProviderEventId ?? '',
-              isStale: currentDisplay.isStale,
-              eventCount: cachedEvents.length,
-              lastUpdatedAt: currentDisplay.lastUpdatedAt ?? '',
-            });
-            return currentDisplay;
-          }
-
-          logDisplayFeedUpdate('local-stale-check', 'mark-stale-no-cache', {
-            providerEventId: currentDisplay.providerEventId ?? currentDisplay.activeProviderEventId ?? '',
-            isStale: true,
-            eventCount: 0,
-            lastUpdatedAt: currentDisplay.lastUpdatedAt ?? '',
-          });
-
-          return {
-            ...currentDisplay,
-            isStale: true,
-          };
-        });
-      }
-    }, STALE_CHECK_INTERVAL_MS);
-
-    return () => {
-      window.clearInterval(intervalId);
-    };
-  }, [display.lastUpdatedAt, logDisplayFeedUpdate]);
-
-  useEffect(() => {
-    if (!selectedLeagueId || !selectedLeagueProvider) return undefined;
-
-    let cancelled = false;
-    let requestInFlight = false;
-    const hydrateDisplayFromRest = async () => {
-      if (requestInFlight) return;
-      requestInFlight = true;
-      const requestSequence = ++displayRequestSequenceRef.current;
-      try {
-        const payload = await getDisplay(selectedLeagueProvider, selectedLeagueId);
-        if (cancelled || requestSequence !== displayRequestSequenceRef.current) return;
-
-        const nextEvents = applyDisplayPayload(payload, 'rest-fallback');
-        if (nextEvents.length > 0) upsertLeagueFromDisplayPayload(payload);
-        setError('');
-      } catch (err) {
-        if (!cancelled) console.error('Virtual-Api fallback display hydrate error:', err);
-      } finally {
-        requestInFlight = false;
-      }
-    };
-
-    const intervalId = window.setInterval(hydrateDisplayFromRest, REST_FALLBACK_INTERVAL_MS);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(intervalId);
-    };
-  }, [
-    applyDisplayPayload,
-    selectedLeagueId,
-    selectedLeagueProvider,
-    upsertLeagueFromDisplayPayload,
-  ]);
-
   const totalOdds = useMemo(
     () => slip.reduce((total, pick) => total * Number(pick.odd), 1),
     [slip]
@@ -2959,10 +2268,10 @@ const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
     lastUpdateTime: toDate(display.lastUpdatedAt),
     eventCount: display.events.length,
   };
-  const timerTargetDate = toDate(display.activeNextRefreshAt || display.activeEndAt);
+  const timerTargetDate = countdownDeadline;
   const countdownTargetLabel = timerTargetDate ? formatClockTime(timerTargetDate) : '--:--';
   const [leagueTitleTop, leagueTitleBottom] = splitLeagueTitle(display.leagueName || getLeagueName(selectedLeague));
-  const isLoading = loadingLeagues || loadingDisplay;
+  const isLoading = feed.loading;
   const events = useMemo(
     () => getUniqueDisplayEvents(display.events, 10),
     [display.events]
@@ -2971,9 +2280,17 @@ const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
   const activeMarket = marketTabs.find(({code}) => code === activeMarketCode) ?? marketTabs[0] ?? null;
 
   useEffect(() => {
-    if (marketTabs.length === 0 || marketTabs.some(({code}) => code === activeMarketCode)) return;
-    setActiveMarketCode(marketTabs[0].code);
+    if (marketTabs.some(({code, disabled}) => code === activeMarketCode && !disabled)) return;
+    setActiveMarketCode(marketTabs.find(({disabled}) => !disabled)?.code || 'MAIN');
   }, [activeMarketCode, marketTabs]);
+
+  useEffect(() => {
+    const compatible = new Set(activeMarket?.selections.map(selection => selection.key));
+    setSlip(current => {
+      const next = current.filter(pick => compatible.has(pick.selectionKey));
+      return next.length === current.length ? current : next;
+    });
+  }, [activeMarket]);
   const updateAgeMs = displayMeta.lastUpdateTime
     ? currentTime - displayMeta.lastUpdateTime.getTime()
     : null;
@@ -2984,10 +2301,16 @@ const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
   const isSyncing = !isStale && !hasLiveUpdate && hasCountdownRolledOver;
   const isOffline = isStale || !hasDisplayEvents;
   const eventCount = events.length;
-  const isBettingClosed = (
+  const hasSelections = events.some(match => match.blocked === 0 && match.marketPages.some(market =>
+    market.selections.some(selection => Number.isFinite(Number(selection.odd)) && Number(selection.odd) > 0)));
+  const closedMessage = closedBoardMessage(display);
+  const isBettingClosed = isLoading || Boolean(error) || bettingClosed(display) || (
     countdownSeconds !== null && countdownSeconds <= 0
-  ) || display.isStale === true || eventCount === 0;
+  ) || display.isStale === true || eventCount === 0 || !hasSelections;
   const isBettingClosedRef = useRef(isBettingClosed);
+  const boardIdentity = `${feed.leagueId}:${display.providerEventId || ''}`;
+  const boardIdentityRef = useRef(boardIdentity);
+  boardIdentityRef.current = boardIdentity;
   const stakeInputRef = useRef(null);
   isBettingClosedRef.current = isBettingClosed;
   const liveStatusLabel = isStale ? 'STALE' : isSyncing ? 'SYNCING' : 'LIVE';
@@ -2996,7 +2319,6 @@ const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
     if (!isBettingClosed) return;
 
     setSlip([]);
-    setTicketStatus(null);
   }, [isBettingClosed]);
 
   const addToSlip = (match, matchIndex, selection) => {
@@ -3014,6 +2336,7 @@ const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
       '';
 
     const pick = {
+      boardIdentity,
       id: `${match.home}-${match.away}`,
       match: `${match.home} vs ${match.away}`,
       providerMatchId,
@@ -3078,6 +2401,13 @@ const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
   };
 
   const submitTicket = async () => {
+    if (ticketSubmitting || !slip.length) return;
+    if (slip.some(pick => pick.boardIdentity !== boardIdentityRef.current)) {
+      setSlip([]);
+      setTicketStatus({type: 'info', message: 'Bet slip cleared because the event changed.'});
+      return;
+    }
+    const submittedBoardIdentity = boardIdentityRef.current;
     if (isBettingClosedRef.current) {
       setTicketStatus({type: 'error', message: BETTING_CLOSED_MESSAGE});
       return;
@@ -3104,7 +2434,7 @@ const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
         return;
       }
 
-      if (isBettingClosedRef.current) {
+      if (isBettingClosedRef.current || submittedBoardIdentity !== boardIdentityRef.current) {
         setTicketStatus({type: 'error', message: BETTING_CLOSED_MESSAGE});
         return;
       }
@@ -3191,7 +2521,7 @@ const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
       setPayoutOpen(true);
       return {ok: true, message: 'Payout opened'};
     },
-    onOpenResults,
+    onOpenResults: () => onOpenResults?.(feed.leagueId),
     onOpenSearch: () => {
       if (ticketSubmitting) return {ok: false, message: 'Ticket submission is in progress'};
       setPayoutOpen(true);
@@ -3226,9 +2556,10 @@ const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
           {leagues.map((league) => (
             <button
               className={`competition-tab${selectedLeague?.id === league.id ? ' active' : ''}`}
-              disabled={loadingDisplay}
+              disabled={ticketSubmitting}
+              aria-pressed={selectedLeague?.id === league.id}
               key={league.id}
-              onClick={() => setSelectedLeague(league)}
+              onClick={() => switchLeague(league)}
               type="button"
             >
               <FaTrophy />
@@ -3241,7 +2572,7 @@ const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
         <TerminalHeaderActions
           currentTime={currentTime}
           onLogout={onLogout}
-          onOpenResults={onOpenResults}
+          onOpenResults={() => onOpenResults?.(feed.leagueId)}
           onOpenTickets={onOpenTickets}
           tableTheme={tableTheme}
           terminal={terminal}
@@ -3249,10 +2580,26 @@ const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
         />
       </section>
 
+      <div className="week-navigation">
+        <nav className="week-tabs" aria-label="Weeks">
+          {feed.boards.map(board => (
+            <button
+              key={weekKey(board)}
+              className={`week-tab${feed.selectedWeekKey === weekKey(board) ? ' active' : ''}`}
+              aria-pressed={feed.selectedWeekKey === weekKey(board)}
+              disabled={ticketSubmitting}
+              onClick={() => switchWeek(board)}
+              type="button"
+            >
+              WEEK {board.weekNumber}
+            </button>
+          ))}
+        </nav>
+      </div>
+
       <section className="terminal-body">
         <div className="odds-area">
           <div className="jackpot-row">
-            <div className="week-ribbon">{isOffline ? 'OFFLINE' : getWeekCode(displayMeta)}</div>
             <div className="jackpot">
               <span className="jackpot-label">GOLD<br />JACKPOT</span>
               <span className="jackpot-amount">9,400 USh</span>
@@ -3275,13 +2622,14 @@ const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
                   )}
                 </div>
                 <div className="league-code">{getLeagueCode(selectedLeague, displayMeta)}</div>
+                <div className="league-week">{isOffline ? 'OFFLINE' : getWeekCode(displayMeta)}</div>
               </div>
               <div className="timer-column">
                 {!isOffline && (
                   <div className="timer-dial">
                     <div>
-                      <div className="timer-time">{displayCountdown}</div>
-                      <div className="timer-sub">{countdownTargetLabel}</div>
+                      <div className={`timer-time${lifecycleState === 'LIVE' ? ' live-time' : ''}`}>{displayCountdown}</div>
+                      <div className="timer-sub">{lifecycleState === 'LIVE' ? 'CLOSED' : lifecycleState === 'FINISHED' ? 'FINAL' : countdownTargetLabel}</div>
                     </div>
                   </div>
                 )}
@@ -3353,7 +2701,7 @@ const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
                   <span className="match-number">{index + 1}</span>
                   <Crest code={match.home} color={getCrestColor(match.home)} />
                   <span className="team-code">{match.home}</span>
-                  <span className="versus">vs</span>
+                  <span className="versus" aria-label={`Score ${match.home} vs ${match.away}`}>{match.homeScore != null && match.awayScore != null ? `${match.homeScore}–${match.awayScore}` : 'vs'}</span>
                   <span className="team-code">{match.away}</span>
                   <Crest code={match.away} color={getCrestColor(match.away)} />
                   <button
@@ -3393,7 +2741,7 @@ const Grid = ({onLogout, onOpenResults, onOpenTickets, terminal}) => {
           </div>
           {isBettingClosed && (
             <div className="betting-closed-message" role="status">
-              {BETTING_CLOSED_MESSAGE}
+              {closedMessage}
             </div>
           )}
           {ticketStatus && (

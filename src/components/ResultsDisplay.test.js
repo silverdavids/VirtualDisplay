@@ -68,6 +68,16 @@ test('ignores result boards for another provider or league', async () => {
   expect(screen.getByText('WAITING FOR RESULTS')).toBeInTheDocument();
 });
 
+test('EPL requests league 78 results and ignores Champions even with the same league number', async () => {
+  getLatestResults.mockResolvedValue({...board, leagueId: '78', leagueName: 'Premier League'});
+  render(<ResultsDisplay leagueId="78" />);
+  expect(await screen.findByText('PSG')).toBeInTheDocument();
+  expect(getLatestResults).toHaveBeenCalledWith('78');
+  act(() => handlers[RESULTS_UPDATED_EVENT]({...board, leagueId: '21', leagueNumber: '78',
+    matches: [{home: 'WRONG', away: 'LEAGUE'}]}));
+  expect(screen.queryByText('WRONG')).not.toBeInTheDocument();
+});
+
 test('counts seconds for one result group and resets for the next provider event', async () => {
   jest.useFakeTimers();
   jest.setSystemTime(new Date('2026-07-26T12:00:00.000Z'));

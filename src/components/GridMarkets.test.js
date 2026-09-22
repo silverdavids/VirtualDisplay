@@ -1,6 +1,43 @@
 import {buildMarketTabs, getCanonicalMarketCode, normalizeBlocked, normalizeEventMarkets} from './Grid';
+import {providerMarkets} from '../testFixtures/providerMarkets';
 
 const eventWith = (markets) => ({marketPages: normalizeEventMarkets({markets})});
+
+test('raw provider queue groups enable all six tabs with correct outcomes and ticket metadata', () => {
+  const tabs = buildMarketTabs([eventWith(providerMarkets(2.75))]);
+  expect(tabs.map(tab => tab.disabled)).toEqual([false,false,false,false,false,false]);
+  expect(tabs[2].selections.map(selection => selection.label)).toEqual(['OV0.5','UN0.5','OV1.5','UN1.5']);
+  expect(tabs[3].selections[0]).toMatchObject({marketCode:'AWAY_OU', line:0.5, odd:2.75,
+    matchOddId:'team-AWAY-0.5-OVER'});
+  expect(tabs[4].selections.map(selection => selection.label)).toEqual([
+    '1+OV1.5','1+UN1.5','X+OV1.5','X+UN1.5','2+OV1.5','2+UN1.5',
+  ]);
+  expect(tabs[5].selections[2]).toMatchObject({marketCode:'1X2_OU_2.5', line:2.5,
+    matchOddId:'result-DRAW-2.5-OVER'});
+});
+
+test('raw grouped markets honor market and individual outcome suspension', () => {
+  const markets = providerMarkets();
+  markets[4].suspended = true;
+  markets[5].selections = markets[5].selections.map(selection => ({...selection,
+    suspended:selection.name.includes('1.5')}));
+  const tabs = buildMarketTabs([eventWith(markets)]);
+  expect(tabs.map(tab => tab.disabled)).toEqual([false,false,true,true,true,false]);
+});
+
+test('only finite positive and unsuspended odds enable a market, including object odds', () => {
+  for (const patch of [{suspended:true}, {blocked:1}, {available:false}, {status:'SUSPENDED'}]) {
+    const event = eventWith([{code:'HOME_OU', ...patch, selections:[{name:'OV 0.5', odd:2}]}]);
+    expect(buildMarketTabs([event])[2].disabled).toBe(true);
+  }
+  for (const odd of [0, -1, 'NaN', '-', Infinity]) {
+    expect(buildMarketTabs([eventWith({homeOverUnder:{'OV 0.5':odd}})])[2].disabled).toBe(true);
+  }
+  expect(buildMarketTabs([eventWith({homeOverUnder:{'OV 0.5':{odd:2,suspended:true}}})])[2].disabled).toBe(true);
+  const marketPages = normalizeEventMarkets({odds:{homeOverUnder:{'OV 0.5':{price:2}}}});
+  expect(buildMarketTabs([{marketPages}])[2].disabled).toBe(false);
+  expect(buildMarketTabs([{marketPages, blocked:1}])[2].disabled).toBe(true);
+});
 
 test('normalizes blocked flags consistently across REST and socket types', () => {
   expect([0, '0', false, 'false', 'no', null, undefined].map(normalizeBlocked)).toEqual([
@@ -171,12 +208,13 @@ test('excludes 2.5 and numerically orders all other OVER / UNDER lines', () => {
   ]);
 });
 
-test('disables OVER / UNDER when 2.5 is the only available line', () => {
+test('enables OVER / UNDER when 2.5 is the only available line', () => {
   const tabs = buildMarketTabs([
     eventWith({overUnder: {'OV 2.5': 2, 'UN 2.5': 1.5}}),
   ]);
 
-  expect(tabs[1]).toMatchObject({code: 'OU', disabled: true, selections: []});
+  expect(tabs[1]).toMatchObject({code: 'OU', disabled: false});
+  expect(tabs[1].selections.map(item => item.label)).toEqual(['OV2.5', 'UN2.5']);
 });
 
 test('rejects numeric outcome identifiers and invalid whole-number total lines', () => {
